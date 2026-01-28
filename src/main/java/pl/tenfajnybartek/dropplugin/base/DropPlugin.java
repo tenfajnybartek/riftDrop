@@ -62,53 +62,58 @@ public class DropPlugin extends JavaPlugin {
     }
 
     @Override
-    public void onDisable() {
-        if (!this.forceDisable) {
-            if (this.userManager != null) {
-                for (Player player : Bukkit.getOnlinePlayers()) {
-                    try {
-                        this.userManager.save(player.getUniqueId(), true);
-                    } catch (Exception e) {
-                        logger.warning("Błąd zapisu użytkownika " + player.getUniqueId() + ": " + e.getMessage());
-                        e.printStackTrace();
-                    }
-                }
+public void onDisable() {
+    if (forceDisable) {
+        logger.info("Shutdown przerwany (forceDisable=true).");
+        return;
+    }
+
+    logger.info("Wyłączanie pluginu tfbDrop...");
+
+    // 1. Zatrzymaj taski NAJPIERW
+    if (this.saverTask != null) {
+        this.saverTask.cancel();
+    }
+    if (this.actionBarTask != null) {
+        this.actionBarTask.cancel();
+    }
+
+    // 2. Zapisz graczy
+    if (this.userManager != null) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            try {
+                this.userManager.save(player.getUniqueId(), true);
+            } catch (Exception e) {
+                logger.warning("Błąd zapisu użytkownika " + player.getName() + ": " + e.getMessage());
             }
-            if (this.saverTask != null) {
-                this.saverTask.cancel();
-            }
-            if (this.actionBarTask != null) {
-                this.actionBarTask.cancel();
-                this.actionBarTask = null;
-            }
-            if (this.database != null) {
-                try {
-                    this.database.disconnect(true);
-                } catch (Exception e) {
-                    logger.warning("Błąd podczas rozłączania bazy danych: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            }
-        } else {
-            logger.info("Shutdown przerwany z powodu wcześniejszej błędnej inicjalizacji (forceDisable=true).");
         }
     }
+
+    // 3. Zamknij bazę danych NA KOŃCU
+    if (this.database != null) {
+        try {
+            this.database.disconnect(true);
+        } catch (Exception e) {
+            logger.warning("Błąd zamykania bazy: " + e.getMessage());
+        }
+    }
+
+    logger.info("Plugin tfbDrop wyłączony pomyślnie.");
+}
 
     private void registerListeners() {
-        Object[] listeners = new Object[] {
-                new BlockBreakListener(this),
-                new InventoryClickListener(this),
-                new PlayerJoinLeaveListener(this),
-                new UserLevelChangeListener(this),
-                new UserPointsChangeListener(this)
-        };
+    Listener[] listeners = {
+        new BlockBreakListener(this),
+        new InventoryClickListener(this),
+        new PlayerJoinLeaveListener(this),
+        new UserLevelChangeListener(this),
+        new UserPointsChangeListener(this)
+    };
 
-        for (Object obj : listeners) {
-            if (obj instanceof Listener) {
-                Bukkit.getPluginManager().registerEvents((Listener) obj, this);
-            }
-        }
+    for (Listener listener : listeners) {
+        Bukkit.getPluginManager().registerEvents(listener, this);
     }
+}
 
     private void registerCommands() {
         new DropCommand(this);
