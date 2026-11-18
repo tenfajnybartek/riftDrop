@@ -2,13 +2,15 @@ package pl.tenfajnybartek.dropplugin.objects;
 
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Pattern;
 
 public final class Count {
+    private static final Pattern RANGE = Pattern.compile("(-?\\d+)(?:\\s*-\\s*(-?\\d+))?");
     private final int min;
     private final int max;
 
     public Count(int min, int max) {
-        if (max < min) max = min;
+        if (max < min) throw new IllegalArgumentException("Koniec zakresu jest mniejszy od początku.");
         this.min = min;
         this.max = max;
     }
@@ -23,7 +25,7 @@ public final class Count {
 
     public int random() {
         if (this.min == this.max) return this.min;
-        return ThreadLocalRandom.current().nextInt(this.min, this.max + 1);
+        return (int) ThreadLocalRandom.current().nextLong(min, (long) max + 1);
     }
 
     @Override
@@ -31,48 +33,12 @@ public final class Count {
         return this.min + "-" + this.max;
     }
 
-    public static Count parse(String toParse) {
-        if (toParse == null || toParse.isBlank()) {
-            return new Count(0, 1);
-        }
-        
-        String trimmed = toParse.trim();
-        try {
-            if (!trimmed.contains("-")) {
-                int v = Integer.parseInt(trimmed);
-                return new Count(v, v);
-            }
-
-            int firstDash = trimmed.indexOf('-');
-
-            if (firstDash == 0) {
-                int secondDash = trimmed.indexOf('-', 1);
-                
-                if (secondDash == -1) {
-                    int v = Integer.parseInt(trimmed);
-                    return new Count(v, v);
-                }
-
-                String minStr = trimmed.substring(0, secondDash);
-                String maxStr = trimmed.substring(secondDash + 1);
-                
-                int min = Integer.parseInt(minStr);
-                int max = Integer.parseInt(maxStr);
-                return new Count(min, max);
-            } else {
-                String[] parts = trimmed.split("-", 2);
-                if (parts.length != 2) {
-                    return new Count(0, 1);
-                }
-                
-                int min = Integer.parseInt(parts[0].trim());
-                int max = Integer.parseInt(parts[1].trim());
-                return new Count(min, max);
-            }
-        } catch (NumberFormatException ex) {
-            java.util.logging.Logger.getLogger("DropPlugin").warning("Nieprawidłowy format Count: '" + toParse + "' - używam domyślnej wartości (0-1)");
-            return new Count(0, 1);
-        }
+    public static Count parse(String text) {
+        if (text == null) throw new IllegalArgumentException("Brakuje zakresu.");
+        var range = RANGE.matcher(text.trim());
+        if (!range.matches()) throw new IllegalArgumentException("Nieprawidłowy zakres: " + text);
+        int min = Integer.parseInt(range.group(1));
+        return new Count(min, range.group(2) == null ? min : Integer.parseInt(range.group(2)));
     }
 
     @Override

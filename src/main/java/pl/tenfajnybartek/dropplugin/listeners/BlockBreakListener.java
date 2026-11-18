@@ -5,24 +5,16 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import pl.tenfajnybartek.dropplugin.base.DropPlugin;
-import pl.tenfajnybartek.dropplugin.managers.DropManager;
 
-
-public class BlockBreakListener implements Listener {
-
-    private final DropManager dropManager;
+public final class BlockBreakListener implements Listener {
+    private final DropPlugin plugin;
 
     public BlockBreakListener(DropPlugin plugin) {
-        this.dropManager = plugin.getDropManager();
+        this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBreak(BlockBreakEvent event) {
-        try {
-            this.dropManager.breakBlock(event);
-        } catch (Exception e) {
-            event.getPlayer().sendMessage("§cWystąpił błąd podczas przetwarzania dropu. Skontaktuj się z administratorem.");
-            e.printStackTrace();
-        }
+        plugin.getDropManager().breakBlock(event);
     }
 }

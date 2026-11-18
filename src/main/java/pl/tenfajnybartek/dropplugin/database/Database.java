@@ -1,298 +1,344 @@
 package pl.tenfajnybartek.dropplugin.database;
 
+import com.mysql.cj.jdbc.MysqlDataSource;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.bukkit.Bukkit;
-import org.bukkit.plugin.Plugin;
-import pl.tenfajnybartek.dropplugin.base.DropPlugin;
-import pl.tenfajnybartek.dropplugin.managers.ConfigManager;
-import pl.tenfajnybartek.dropplugin.objects.User;
+import org.sqlite.SQLiteConfig;
+import org.sqlite.SQLiteDataSource;
+import pl.tenfajnybartek.dropplugin.objects.User.Profile;
 import pl.tenfajnybartek.dropplugin.utils.MapUtils;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.sql.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
-public class Database {
-    private static Database database;
-    private final DropPlugin plugin;
+public final class Database {
+    public static final int TOP_LIMIT = 100;
+    public record Rank(String name, int level) {}
+
+    public record Settings(String type, String host, int port, String schema, String username, String password,
+                           String sslMode, int poolSize, long connectionTimeoutMs, long idleTimeoutMs, long leakDetectionMs) {}
+
+    private final Settings config;
+    private final Path recovery;
+    private final File file;
     private final Logger logger;
-    private HikariDataSource ds;
-    private String dbType;
+    private final boolean sqlite;
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "DropPlugin-database");
+        thread.setDaemon(true);
+        return thread;
+    });
+    // The main thread publishes snapshots. Only the worker commits them, in submission order.
+    private final Map<UUID, Profile> pending = new ConcurrentHashMap<>();
+    private volatile boolean recoveryLoaded;
+    private volatile boolean saveQueued;
+    private HikariDataSource pool;
+    private long retryAfter;
+    private volatile List<Rank> ranking = List.of();
+    private volatile boolean refreshQueued;
 
-    public Database(DropPlugin plugin) {
-        this.plugin = plugin;
-        this.logger = plugin.getLogger();
-        database = this;
+    public Database(Settings config, File folder, Logger logger) {
+        this.config = config;
+        this.file = new File(folder, "database.db");
+        this.logger = logger;
+        this.sqlite = config.type().equals("sqlite");
+        this.recovery = folder.toPath().resolve(recoveryName(config));
+    }
 
-        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
-            ConfigManager config = plugin.getPluginConfig();
-            this.dbType = config.getDbType();
-            
-            this.logger.info("Łączenie z bazą danych (" + this.dbType.toUpperCase() + ")...");
+    private static String recoveryName(Settings config) {
+        if (config.type().equals("sqlite")) return "pending-sqlite.properties";
+        String destination = config.host() + ":" + config.port() + "/" + config.schema();
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(destination.getBytes(StandardCharsets.UTF_8));
+            return "pending-mysql-" + HexFormat.of().formatHex(digest, 0, 8) + ".properties";
+        } catch (NoSuchAlgorithmException failure) {
+            throw new IllegalStateException(failure);
+        }
+    }
 
-            String jdbcUrl;
-            HikariConfig hikariConfig = new HikariConfig();
-            
-            if ("sqlite".equalsIgnoreCase(dbType)) {
-                java.io.File dataFolder = plugin.getDataFolder();
-                if (!dataFolder.exists()) {
-                    dataFolder.mkdirs();
-                }
-                java.io.File dbFile = new java.io.File(dataFolder, "database.db");
-                jdbcUrl = "jdbc:sqlite:" + dbFile.getAbsolutePath();
-                
-                hikariConfig.setJdbcUrl(jdbcUrl);
-                hikariConfig.setMaximumPoolSize(1);
-                hikariConfig.setConnectionTimeout(config.getDbConnectionTimeoutMs());
-
-                hikariConfig.addDataSourceProperty("journal_mode", "WAL");
-                hikariConfig.addDataSourceProperty("synchronous", "NORMAL");
-                
-                this.logger.info("Używam SQLite: " + dbFile.getAbsolutePath());
-            } else {
-                String host = config.getDbHost();
-                int port = config.getDbPort();
-                String base = config.getDbBase();
-                String user = config.getDbUser();
-                String pass = config.getDbPass();
-                int maxPool = config.getDbMaxPool() > 0 ? config.getDbMaxPool() : 10;
-
-                jdbcUrl = String.format("jdbc:mysql://%s:%d/%s?useSSL=false&serverTimezone=UTC", host, port, base);
-
-                hikariConfig.setJdbcUrl(jdbcUrl);
-                hikariConfig.setUsername(user);
-                hikariConfig.setPassword(pass);
-                hikariConfig.setMaximumPoolSize(maxPool);
-                hikariConfig.setConnectionTimeout(config.getDbConnectionTimeoutMs());
-                hikariConfig.setIdleTimeout(config.getDbIdleTimeoutMs());
-                if (config.getDbLeakDetectionThresholdMs() > 0) {
-                    hikariConfig.setLeakDetectionThreshold(config.getDbLeakDetectionThresholdMs());
-                }
-
-                hikariConfig.addDataSourceProperty("cachePrepStmts", "true");
-                hikariConfig.addDataSourceProperty("prepStmtCacheSize", "250");
-                hikariConfig.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
-                
-                this.logger.info("Używam MySQL: " + host + ":" + port + "/" + base);
+    private void restorePending() throws IOException {
+        if (recoveryLoaded) return;
+        if (Files.exists(recovery)) {
+            Properties properties = new Properties();
+            try (var input = Files.newInputStream(recovery)) {
+                properties.load(input);
             }
+            Map<UUID, Profile> restored = new HashMap<>();
+            for (String key : properties.stringPropertyNames()) {
+                UUID id = UUID.fromString(key);
+                String[] fields = properties.getProperty(key).split(java.util.regex.Pattern.quote("|"), -1);
+                if (fields.length != 9) throw new IOException("Uszkodzony profil w " + recovery);
+                Profile profile = new Profile(id, fields[0].isEmpty() ? null : fields[0],
+                        Boolean.parseBoolean(fields[1]), Boolean.parseBoolean(fields[2]),
+                        Long.parseLong(fields[3]), Long.parseLong(fields[4]), Integer.parseInt(fields[5]),
+                        Long.parseLong(fields[6]), MapUtils.deserializeMap(fields[7]), MapUtils.deserializeList(fields[8]));
+                restored.put(id, profile);
+            }
+            restored.forEach(pending::putIfAbsent);
+            logger.info("Odzyskano " + restored.size() + " oczekujących profili DropPlugin.");
+        }
+        recoveryLoaded = true;
+    }
 
+    private synchronized void preservePending() throws IOException {
+        Map<UUID, Profile> remaining = Map.copyOf(pending);
+        if (remaining.isEmpty()) {
+            if (recoveryLoaded) Files.deleteIfExists(recovery);
+            return;
+        }
+        // Never replace an unreadable recovery file with a partial snapshot.
+        if (!recoveryLoaded && Files.exists(recovery)) return;
+        Properties properties = new Properties();
+        remaining.forEach((id, profile) -> properties.setProperty(id.toString(), String.join("|",
+                Objects.toString(profile.name(), ""), Boolean.toString(profile.cobble()),
+                Boolean.toString(profile.messages()), Long.toString(profile.turboDrop()),
+                Long.toString(profile.turboExp()), Integer.toString(profile.level()), Long.toString(profile.points()),
+                MapUtils.serializeMap(profile.minedDrops()), MapUtils.serializeList(profile.disabledDrops()))));
+        Path temporary = Files.createTempFile(recovery.getParent(), recovery.getFileName().toString(), ".tmp");
+        try {
+            try (var output = Files.newOutputStream(temporary)) {
+                properties.store(output, "DropPlugin pending profiles");
+            }
+            Files.move(temporary, recovery, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
+    }
+
+    private HikariDataSource connect() throws SQLException {
+        if (pool != null) return pool;
+        if (retryAfter != 0 && System.nanoTime() - retryAfter < 0) throw new SQLException("Ponawianie połączenia z bazą za kilka sekund.");
+        HikariConfig hikari = new HikariConfig();
+        hikari.setPoolName("DropPlugin-" + config.type());
+        hikari.setMaximumPoolSize(sqlite ? 1 : config.poolSize());
+        hikari.setMinimumIdle(0);
+        hikari.setConnectionTimeout(config.connectionTimeoutMs());
+        hikari.setIdleTimeout(config.idleTimeoutMs());
+        hikari.setLeakDetectionThreshold(config.leakDetectionMs());
+        hikari.setInitializationFailTimeout(-1);
+        if (sqlite) {
+            SQLiteConfig options = new SQLiteConfig();
+            options.setJournalMode(SQLiteConfig.JournalMode.WAL);
+            options.setBusyTimeout((int) config.connectionTimeoutMs());
+            SQLiteDataSource source = new SQLiteDataSource(options);
+            source.setUrl("jdbc:sqlite:" + file.getAbsolutePath());
+            hikari.setDataSource(source);
+        } else {
+            MysqlDataSource source = new MysqlDataSource();
+            source.setServerName(config.host());
+            source.setPort(config.port());
+            source.setDatabaseName(config.schema());
+            source.setUser(config.username());
+            source.setPassword(config.password());
+            source.setSslMode(config.sslMode());
+            source.setConnectTimeout((int) config.connectionTimeoutMs());
+            source.setSocketTimeout((int) config.connectionTimeoutMs());
+            hikari.setDataSource(source);
+        }
+
+        HikariDataSource candidate = new HikariDataSource(hikari);
+        String keyType = sqlite ? "TEXT" : "VARCHAR(36)";
+        try (Connection connection = candidate.getConnection(); Statement statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS drop_users (
+                        identifier %s NOT NULL PRIMARY KEY,
+                        cobble BOOLEAN NOT NULL, messages BOOLEAN NOT NULL,
+                        turboDrop BIGINT NOT NULL, turboExp BIGINT NOT NULL,
+                        lvl INT NOT NULL, points INT NOT NULL,
+                        minedDrops TEXT NOT NULL, disabledDrops TEXT NOT NULL, last_name VARCHAR(16), data_format SMALLINT NOT NULL DEFAULT 1
+                    )
+                    """.formatted(keyType));
+            ensureColumn(connection, statement, "last_name", "VARCHAR(16)");
+            ensureColumn(connection, statement, "data_format", "SMALLINT NOT NULL DEFAULT 1");
+            ensureRankingIndex(connection, statement);
+            // Verify existing tables have the expected schema before publishing readiness.
+            try (ResultSet ignored = statement.executeQuery("""
+                    SELECT identifier, cobble, messages, turboDrop, turboExp, lvl, points, minedDrops, disabledDrops, last_name, data_format
+                    FROM drop_users WHERE 1 = 0
+                    """)) {
+                pool = candidate;
+            }
+            logger.info("Baza danych gotowa (" + config.type() + ").");
+            return pool;
+        } catch (SQLException | RuntimeException failure) {
+            pool = null;
+            candidate.close();
+            retryAfter = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            throw failure;
+        }
+    }
+
+    private static void ensureColumn(Connection connection, Statement statement, String name, String definition) throws SQLException {
+        try (ResultSet columns = connection.getMetaData().getColumns(connection.getCatalog(), null, "drop_users", name)) {
+            if (columns.next()) return;
+        }
+        statement.executeUpdate("ALTER TABLE drop_users ADD COLUMN " + name + " " + definition);
+    }
+
+    private static void ensureRankingIndex(Connection connection, Statement statement) throws SQLException {
+        try (ResultSet indexes = connection.getMetaData().getIndexInfo(connection.getCatalog(), null, "drop_users", false, false)) {
+            while (indexes.next()) {
+                if ("drop_users_ranking".equalsIgnoreCase(indexes.getString("INDEX_NAME"))) return;
+            }
+        }
+        statement.executeUpdate("CREATE INDEX drop_users_ranking ON drop_users (lvl DESC, points DESC, identifier)");
+    }
+
+    public Future<Profile> load(UUID id) {
+        return worker.submit(() -> {
+            restorePending();
+            Profile unsaved = pending.get(id);
+            if (unsaved != null) return unsaved;
+            try (Connection connection = connect().getConnection();
+                 PreparedStatement statement = connection.prepareStatement("SELECT * FROM drop_users WHERE identifier = ?")) {
+                statement.setString(1, id.toString());
+                try (ResultSet row = statement.executeQuery()) {
+                    if (!row.next()) return Profile.initial(id);
+                    boolean legacy = row.getInt("data_format") == 1;
+                    String counters = row.getString("minedDrops");
+                    String disabled = row.getString("disabledDrops");
+                    return new Profile(id, row.getString("last_name"), row.getBoolean("cobble"), row.getBoolean("messages"),
+                            row.getLong("turboDrop"), row.getLong("turboExp"), row.getInt("lvl"), row.getLong("points"),
+                            legacy ? MapUtils.legacyMap(counters) : MapUtils.deserializeMap(counters),
+                            legacy ? MapUtils.legacyList(disabled) : MapUtils.deserializeList(disabled));
+                }
+            }
+        });
+    }
+
+    public void save(Collection<Profile> profiles) {
+        profiles.forEach(profile -> pending.put(profile.id(), profile));
+        if (saveQueued || (pending.isEmpty() && recoveryLoaded)) return;
+        saveQueued = true;
+        worker.execute(() -> {
+            // Clear before taking a snapshot so further changes can schedule a following commit.
+            saveQueued = false;
             try {
-                ds = new HikariDataSource(hikariConfig);
-                this.logger.info("Połączono z bazą danych!");
-            } catch (Exception e) {
-                this.logger.warning("Nie można połączyć z bazą danych " + dbType.toUpperCase() + "!");
-                e.printStackTrace();
-                Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getPluginManager().disablePlugin((Plugin) plugin));
-                return;
+                flush();
+            } catch (IOException | SQLException | RuntimeException failure) {
+                logger.log(Level.WARNING, "Zapis profili nie powiódł się. Oczekujące dane zostaną zapisane ponownie.", failure);
             }
+        });
+    }
 
-            try (Connection conn = ds.getConnection();
-                 Statement st = conn.createStatement()) {
-                String createTableSQL;
-                if ("sqlite".equalsIgnoreCase(dbType)) {
-                    createTableSQL = "CREATE TABLE IF NOT EXISTS drop_users (" +
-                            "identifier TEXT PRIMARY KEY NOT NULL, " +
-                            "cobble INTEGER NOT NULL, " +
-                            "messages INTEGER NOT NULL, " +
-                            "turboDrop INTEGER NOT NULL, " +
-                            "turboExp INTEGER NOT NULL, " +
-                            "lvl INTEGER NOT NULL, " +
-                            "points INTEGER NOT NULL, " +
-                            "minedDrops TEXT NOT NULL, " +
-                            "disabledDrops TEXT NOT NULL)";
-                } else {
-                    createTableSQL = "CREATE TABLE IF NOT EXISTS `drop_users` (" +
-                            "identifier VARCHAR(255) NOT NULL, " +
-                            "cobble BOOLEAN NOT NULL, " +
-                            "messages BOOLEAN NOT NULL, " +
-                            "turboDrop BIGINT NOT NULL, " +
-                            "turboExp BIGINT NOT NULL, " +
-                            "lvl INT NOT NULL, " +
-                            "points INT NOT NULL, " +
-                            "minedDrops TEXT NOT NULL, " +
-                            "disabledDrops TEXT NOT NULL, " +
-                            "PRIMARY KEY(identifier))";
+    private void flush() throws SQLException, IOException {
+        restorePending();
+        Map<UUID, Profile> submitted = Map.copyOf(pending);
+        if (submitted.isEmpty()) return;
+        String values = sqlite
+                ? "ON CONFLICT(identifier) DO UPDATE SET cobble=excluded.cobble, messages=excluded.messages, turboDrop=excluded.turboDrop, turboExp=excluded.turboExp, lvl=excluded.lvl, points=excluded.points, minedDrops=excluded.minedDrops, disabledDrops=excluded.disabledDrops, last_name=excluded.last_name, data_format=excluded.data_format"
+                : "ON DUPLICATE KEY UPDATE cobble=VALUES(cobble), messages=VALUES(messages), turboDrop=VALUES(turboDrop), turboExp=VALUES(turboExp), lvl=VALUES(lvl), points=VALUES(points), minedDrops=VALUES(minedDrops), disabledDrops=VALUES(disabledDrops), last_name=VALUES(last_name), data_format=VALUES(data_format)";
+        try (Connection connection = connect().getConnection();
+             PreparedStatement statement = connection.prepareStatement("""
+                     INSERT INTO drop_users (identifier, cobble, messages, turboDrop, turboExp, lvl, points, minedDrops, disabledDrops, last_name, data_format)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,2)
+                     """ + values)) {
+            connection.setAutoCommit(false);
+            try {
+                for (Profile profile : submitted.values()) {
+                    statement.setString(1, profile.id().toString());
+                    statement.setBoolean(2, profile.cobble());
+                    statement.setBoolean(3, profile.messages());
+                    statement.setLong(4, profile.turboDrop());
+                    statement.setLong(5, profile.turboExp());
+                    statement.setInt(6, profile.level());
+                    statement.setLong(7, profile.points());
+                    statement.setString(8, MapUtils.serializeMap(profile.minedDrops()));
+                    statement.setString(9, MapUtils.serializeList(profile.disabledDrops()));
+                    statement.setString(10, profile.name());
+                    statement.addBatch();
                 }
-                st.executeUpdate(createTableSQL);
-                this.logger.info("Tabela drop_users została utworzona/sprawdzona.");
-            } catch (SQLException e) {
-                this.logger.warning("Nie można utworzyć tabel w bazie danych!");
-                e.printStackTrace();
+                statement.executeBatch();
+                connection.commit();
+                submitted.forEach(pending::remove);
+            } catch (SQLException | RuntimeException failure) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
             }
+        }
+        if (Files.exists(recovery)) preservePending();
+    }
 
-            int loadedUsers = 0;
-            try (Connection conn = ds.getConnection();
-                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM drop_users");
-                 ResultSet resultSet = ps.executeQuery()) {
-                
-                while (resultSet.next()) {
-                    try {
-                        User user = new User(resultSet);
-                        if (plugin.getUserManager().loadUser(user)) {
-                            loadedUsers++;
-                        } else {
-                            this.logger.warning("Użytkownik " + user.getIdentifier() + " już istnieje w cache");
+    public List<Rank> ranking() {
+        return ranking;
+    }
+
+    public void refreshRanking() {
+        if (refreshQueued) return;
+        refreshQueued = true;
+        worker.execute(() -> {
+            List<Rank> rows = new ArrayList<>();
+            try (Connection connection = connect().getConnection();
+                 PreparedStatement statement = connection.prepareStatement("""
+                         SELECT identifier, lvl, last_name FROM drop_users
+                         ORDER BY lvl DESC, points DESC, identifier ASC LIMIT ?
+                         """)) {
+                statement.setInt(1, TOP_LIMIT);
+                try (ResultSet result = statement.executeQuery()) {
+                    while (result.next()) {
+                        try {
+                            UUID id = UUID.fromString(result.getString(1));
+                            String name = result.getString(3);
+                            rows.add(new Rank(name == null ? id.toString() : name, result.getInt(2)));
+                        } catch (IllegalArgumentException invalid) {
+                            logger.warning("Pominięto nieprawidłowy UUID w rankingu DropPlugin.");
                         }
-                    } catch (Exception e) {
-                        this.logger.warning("Nie można załadować użytkownika: " + e.getMessage());
-                        e.printStackTrace();
                     }
                 }
-                this.logger.info("Załadowano " + loadedUsers + " graczy z bazy danych!");
-            } catch (SQLException e) {
-                this.logger.warning("Nie można załadować graczy z bazy danych!");
-                e.printStackTrace();
+                ranking = List.copyOf(rows);
+            } catch (SQLException | RuntimeException failure) {
+                logger.log(Level.WARNING, "Nie udało się odświeżyć rankingu DropPlugin.", failure);
+            } finally {
+                refreshQueued = false;
             }
         });
     }
 
-    public static Database getInstance() {
-        return database;
-    }
-
-    public void saveUser(User user) {
-        saveUser(user, false);
-    }
-
-    public void saveUser(User user, boolean sync) {
-        if (user == null) {
-            logger.warning("Próba zapisania null użytkownika!");
-            return;
-        }
-        
-        if (ds == null) {
-            logger.warning("DataSource nie jest zainicjalizowany, pomijam saveUser dla " + user.getIdentifier());
-            return;
-        }
-
-        Runnable task = () -> {
-            String sql;
-            if ("sqlite".equalsIgnoreCase(this.dbType)) {
-                sql = "INSERT OR REPLACE INTO drop_users (identifier, cobble, messages, turboDrop, turboExp, lvl, points, minedDrops, disabledDrops) VALUES (?,?,?,?,?,?,?,?,?)";
-            } else {
-                sql = "REPLACE INTO drop_users (identifier, cobble, messages, turboDrop, turboExp, lvl, points, minedDrops, disabledDrops) VALUES (?,?,?,?,?,?,?,?,?)";
-            }
-            
-            try (Connection conn = ds.getConnection();
-                 PreparedStatement preparedStatement = conn.prepareStatement(sql)) {
-
-                preparedStatement.setString(1, user.getIdentifier().toString());
-
-                if ("sqlite".equalsIgnoreCase(this.dbType)) {
-                    preparedStatement.setInt(2, user.isCobble() ? 1 : 0);
-                    preparedStatement.setInt(3, user.isMessages() ? 1 : 0);
-                } else {
-                    preparedStatement.setBoolean(2, user.isCobble());
-                    preparedStatement.setBoolean(3, user.isMessages());
-                }
-                
-                preparedStatement.setLong(4, user.getTurboDrop());
-                preparedStatement.setLong(5, user.getTurboExp());
-                preparedStatement.setInt(6, user.getLvl());
-                preparedStatement.setInt(7, user.getPoints());
-                preparedStatement.setString(8, MapUtils.serializeMap(user.getMinedDrops()));
-                preparedStatement.setString(9, MapUtils.serializeList(user.getDisabledDrops()));
-
-                int affectedRows = preparedStatement.executeUpdate();
-                if (affectedRows > 0) {
-                    logger.fine("Zapisano użytkownika " + user.getIdentifier() + " (poziom: " + user.getLvl() + ", punkty: " + user.getPoints() + ")");
-                }
-            } catch (SQLException e) {
-                this.logger.warning("Nie można zapisać gracza " + user.getIdentifier() + " do bazy danych!");
-                e.printStackTrace();
-            }
-        };
-
-        if (sync) {
-            task.run();
-        } else {
-            plugin.getServer().getScheduler().runTaskAsynchronously(plugin, task);
-        }
-    }
-
-    public void sendEmptyUpdate() {
-        if (ds == null) {
-            logger.fine("DataSource nie zainicjalizowany - pomijam sendEmptyUpdate");
-            return;
-        }
-        plugin.getServer().getScheduler().runTaskAsynchronously(plugin, () -> {
-            try (Connection conn = ds.getConnection();
-                 PreparedStatement statement = conn.prepareStatement("SELECT 1");
-                 ResultSet rs = statement.executeQuery()) {
-            } catch (Exception e) {
-                this.logger.warning("Nie można zaktualizować bazy danych!");
-                e.printStackTrace();
-            }
-        });
-    }
-
-    /**
-     * Gets the player name and level at the specified rank position based on level.
-     * Rank 1 is the player with the highest level.
-     * 
-     * @param rank The rank position (1-based)
-     * @return A String array with [playerName, level] at that rank, or null if no player exists at that rank
-     */
-    public String[] getTopLevelPlayerData(int rank) {
-        if (rank < 1) {
-            return null;
-        }
-        
-        if (ds == null) {
-            logger.fine("DataSource nie zainicjalizowany - pomijam getTopLevelPlayerData");
-            return null;
-        }
-        
-        // SQL query is the same for both SQLite and MySQL
-        String sql = "SELECT identifier, lvl FROM drop_users ORDER BY lvl DESC, points DESC LIMIT 1 OFFSET ?";
-        
-        try (Connection conn = ds.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setInt(1, rank - 1); // OFFSET is 0-based
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    String uuidStr = rs.getString("identifier");
-                    int level = rs.getInt("lvl");
-                    try {
-                        java.util.UUID uuid = java.util.UUID.fromString(uuidStr);
-                        // Try to get the name from Bukkit (works for online/offline players)
-                        org.bukkit.OfflinePlayer offlinePlayer = org.bukkit.Bukkit.getOfflinePlayer(uuid);
-                        String name = offlinePlayer.getName();
-                        String playerName = name != null ? name : uuidStr;
-                        return new String[]{playerName, String.valueOf(level)};
-                    } catch (IllegalArgumentException e) {
-                        return new String[]{uuidStr, String.valueOf(level)};
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            logger.warning("Nie można pobrać top gracza na pozycji " + rank + ": " + e.getMessage());
-        }
-        
-        return null;
-    }
-
-    public void disconnect() {
-        disconnect(false);
-    }
-
-    public void disconnect(boolean sync) {
-        Runnable task = () -> {
+    public void close() {
+        Future<?> shutdown = worker.submit(() -> {
             try {
-                if (ds != null && !ds.isClosed()) {
-                    ds.close();
-                    logger.info("Pula Hikari została zamknięta.");
-                }
-            } catch (Exception e) {
-                logger.warning("Nie można zamknąć połączenia z bazą danych!");
-                e.printStackTrace();
+                retryAfter = 0;
+                flush();
+            } catch (IOException | SQLException | RuntimeException failure) {
+                logger.log(Level.SEVERE, "Nie udało się zapisać " + pending.size() + " profili przed zamknięciem.", failure);
+            } finally {
+                saveRecoveryFile();
+                if (pool != null) pool.close();
             }
-        };
+        });
+        worker.shutdown();
+        try {
+            shutdown.get(Math.min(config.connectionTimeoutMs() + 5000, 20_000L), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException failure) {
+            saveRecoveryFile();
+            Thread.currentThread().interrupt();
+            logger.log(Level.WARNING, "Przerwano oczekiwanie na zapis profili.", failure);
+        } catch (ExecutionException | TimeoutException failure) {
+            saveRecoveryFile();
+            logger.log(Level.SEVERE, "Zamykanie bazy DropPlugin nie zakończyło się w wyznaczonym czasie.", failure);
+        }
+    }
 
-        if (sync) {
-            task.run();
-        } else {
-            plugin.getServer().getScheduler().runTaskAsynchronously(plugin, task);
+    private void saveRecoveryFile() {
+        try {
+            preservePending();
+        } catch (IOException | RuntimeException failure) {
+            logger.log(Level.SEVERE, "Nie udało się zabezpieczyć niezapisanych profili w " + recovery, failure);
         }
     }
 }

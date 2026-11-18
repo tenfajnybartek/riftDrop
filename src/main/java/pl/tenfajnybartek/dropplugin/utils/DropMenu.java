@@ -1,45 +1,71 @@
 package pl.tenfajnybartek.dropplugin.utils;
 
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
-import org.apache.commons.lang3.StringUtils;
 import org.bukkit.Bukkit;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.ItemFlag;
+import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
-import pl.tenfajnybartek.dropplugin.base.DropPlugin;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.inventory.ItemFlag;
+import org.apache.commons.lang3.StringUtils;
 import pl.tenfajnybartek.dropplugin.managers.ConfigManager;
 import pl.tenfajnybartek.dropplugin.managers.DropManager;
-import pl.tenfajnybartek.dropplugin.managers.UserManager;
-import pl.tenfajnybartek.dropplugin.objects.Chance;
 import pl.tenfajnybartek.dropplugin.objects.Drop;
 import pl.tenfajnybartek.dropplugin.objects.User;
 
-import java.util.Objects;
+import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-public class DropMenu {
-    private final DropManager dropManager;
-    private final UserManager userManager;
-    private final ConfigManager config;
+public final class DropMenu {
+    public static final class Holder implements InventoryHolder {
+        private final DropMenu menu;
+        private final Map<Integer, Consumer<User>> actions = new HashMap<>();
+        private final Inventory inventory;
 
-    public DropMenu(DropPlugin plugin) {
-        this.dropManager = plugin.getDropManager();
-        this.userManager = plugin.getUserManager();
-        this.config = plugin.getPluginConfig();
+        private Holder(DropMenu menu) {
+            this.menu = menu;
+            this.inventory = Bukkit.createInventory(this, menu.config.getGuiSize(), ChatUtils.toComponent(menu.config.getGuiName()));
+        }
+
+        @Override
+        public Inventory getInventory() { return inventory; }
+
+        public boolean belongsTo(DropMenu active) { return menu == active; }
+
+        public boolean apply(int slot, User user) {
+            var action = actions.get(slot);
+            if (action == null) return false;
+            action.accept(user);
+            return true;
+        }
     }
 
-    public Inventory createInventory(Player player) {
-        int size = this.config.getGuiSize();
-        if (size < 9) size = 9;
-        if (size % 9 != 0) size = (size / 9) * 9;
+    private final DropManager dropManager;
+    private final ConfigManager config;
+    private final List<Integer> dropSlots;
 
-        Component title = LegacyComponentSerializer.legacyAmpersand().deserialize(this.config.getGuiName());
-        Inventory inventory = Bukkit.createInventory(null, size, title);
+    public DropMenu(ConfigManager config, DropManager dropManager) {
+        this.config = config;
+        this.dropManager = dropManager;
+        Set<Integer> reserved = new HashSet<>();
+        if (config.isCobbleStatus()) reserved.add(config.getCobbleSlot());
+        if (config.isMessagesStatus()) reserved.add(config.getMessagesSlot());
+        if (config.isTurboStatus()) reserved.add(config.getTurboSlot());
+        if (config.isLevelStatus()) reserved.add(config.getLevelSlot());
+        if (config.isEnableAllStatus()) reserved.add(config.getEnableAllSlot());
+        if (config.isDisableAllStatus()) reserved.add(config.getDisableAllSlot());
+        dropSlots = java.util.stream.IntStream.range(0, config.getGuiSize()).boxed()
+                .filter(slot -> !reserved.contains(slot)).toList();
+        if (dropManager.getDropList().size() > dropSlots.size()) {
+            throw new IllegalArgumentException("gui.yml: menu nie ma wystarczającej liczby slotów na dropy.");
+        }
+    }
 
-        User user = this.userManager.getUser(player);
+    public Inventory createInventory(Player player, User user) {
+        Holder holder = new Holder(this);
+        Inventory inventory = holder.getInventory();
+        int size = inventory.getSize();
 
         ItemStack cobble = this.config.getCobbleItem()
                 .setName(this.config.getGuiCobbleName())
@@ -83,7 +109,10 @@ public class DropMenu {
                 .setName(this.config.getGuiFillerName())
                 .build();
 
+        double bonus = dropManager.permissionBonus(player);
+        int index = 0;
         for (Drop drop : this.dropManager.getDropList()) {
+            int slot = dropSlots.get(index++);
             int playerLevel = (user != null) ? user.getLvl() : 1;
             boolean isLocked = !drop.isUnlocked(playerLevel);
             
@@ -98,10 +127,10 @@ public class DropMenu {
                                         .replace("{PLAYER-LEVEL}", String.valueOf(playerLevel)))
                                 .collect(Collectors.toList()));
             } else {
-                item = new ItemBuilder(drop.getItemStack().getType())
+                item = new ItemBuilder(drop.getItemStack())
                         .setName(StringUtils.replace(this.config.getGuiItemName(), "{NAME}", drop.getName()))
                         .setLore(this.config.getGuiItemLores().stream()
-                                .map(entry -> this.replaced(user, drop, entry))
+                                .map(entry -> this.replaced(user, drop, entry, bonus))
                                 .collect(Collectors.toList()));
 
                 if (this.config.isEnchanted()) {
@@ -113,7 +142,8 @@ public class DropMenu {
                 }
             }
 
-            inventory.addItem(item.build());
+            inventory.setItem(slot, item.build());
+            if (!isLocked) holder.actions.put(slot, target -> target.setDropEnabled(drop, target.isDisabled(drop)));
         }
 
         if (this.config.isFillerStatus()) {
@@ -125,55 +155,43 @@ public class DropMenu {
 
         if (this.config.isEnableAllStatus()) {
             int slot = this.config.getEnableAllSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, enableAll);
+            inventory.setItem(slot, enableAll);
+            holder.actions.put(slot, target -> dropManager.getDropList().forEach(drop -> target.setDropEnabled(drop, true)));
         }
 
         if (this.config.isDisableAllStatus()) {
             int slot = this.config.getDisableAllSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, disableAll);
+            inventory.setItem(slot, disableAll);
+            holder.actions.put(slot, target -> dropManager.getDropList().forEach(drop -> target.setDropEnabled(drop, false)));
         }
 
         if (this.config.isTurboStatus()) {
             int slot = this.config.getTurboSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, turbos);
+            inventory.setItem(slot, turbos);
         }
 
         if (this.config.isMessagesStatus()) {
             int slot = this.config.getMessagesSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, messages);
+            inventory.setItem(slot, messages);
+            holder.actions.put(slot, target -> target.setMessages(!target.isMessages()));
         }
 
         if (this.config.isCobbleStatus()) {
             int slot = this.config.getCobbleSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, cobble);
+            inventory.setItem(slot, cobble);
+            holder.actions.put(slot, target -> target.setCobble(!target.isCobble()));
         }
 
         if (this.config.isLevelStatus()) {
             int slot = this.config.getLevelSlot();
-            if (slot >= 0 && slot < size) inventory.setItem(slot, level);
+            inventory.setItem(slot, level);
         }
 
         return inventory;
     }
 
-    private String replaced(User user, Drop drop, String entry) {
-        double bonus = 0.0;
-        Player viewer = null;
-        if (user != null) {
-            viewer = user.getPlayer();
-        }
-
-        for (Chance chancee : this.config.getChances().values()) {
-            if (viewer != null && viewer.hasPermission(chancee.getPerm())) {
-                bonus += Objects.requireNonNullElse(chancee.getChance(), 0.0) / 100.0;
-            }
-        }
-
-        double sumChance = drop.getChance() + bonus;
-        if (this.config.isTurboDrop() || (user != null && user.isTurboDrop())) {
-            sumChance *= 2.0;
-        }
-
+    private String replaced(User user, Drop drop, String entry, double bonus) {
+        double sumChance = dropManager.effectiveChance(drop, bonus, user);
         entry = StringUtils.replace(entry, "{CHANCE}", String.format("%.2f", drop.getChance() * 100.0));
         entry = StringUtils.replace(entry, "{CHANCE-BONUS}", String.format("%.2f", bonus * 100.0));
         entry = StringUtils.replace(entry, "{CHANCE-SUM}", String.format("%.2f", sumChance * 100.0));
@@ -184,13 +202,13 @@ public class DropMenu {
         entry = StringUtils.replace(entry, "{AMOUNT-MAX}", String.valueOf(drop.getAmount().getMax()));
         entry = StringUtils.replace(entry, "{POINTS-MIN}", String.valueOf(drop.getPoints().getMin()));
         entry = StringUtils.replace(entry, "{POINTS-MAX}", String.valueOf(drop.getPoints().getMax()));
-        entry = StringUtils.replace(entry, "{STATUS}", (user != null && user.getDisabledDrops().contains(drop.getName())) ? this.config.getGuiStatusOff() : this.config.getGuiStatusOn());
+        entry = StringUtils.replace(entry, "{STATUS}", (user != null && user.isDisabled(drop)) ? this.config.getGuiStatusOff() : this.config.getGuiStatusOn());
         entry = StringUtils.replace(entry, "{FORTUNE}", drop.isFortune() ? this.config.getGuiStatusOn() : this.config.getGuiStatusOff());
-        entry = StringUtils.replace(entry, "{MINED}", Integer.toString(user != null ? user.getDrop(drop.getName()) : 0));
+        entry = StringUtils.replace(entry, "{MINED}", Integer.toString(user != null ? user.getDrop(drop) : 0));
         return entry;
     }
 
-    public String replaced(User user, String entry, int type) {
+    private String replaced(User user, String entry, int type) {
         switch (type) {
             case 1: {
                 entry = StringUtils.replace(entry, "{STATUS}", (user != null && user.isCobble()) ? this.config.getGuiStatusOn() : this.config.getGuiStatusOff());
@@ -215,6 +233,7 @@ public class DropMenu {
                 entry = StringUtils.replace(entry, "{LVL}", String.valueOf(user != null ? user.getLvl() : 0));
                 entry = StringUtils.replace(entry, "{PKT}", String.valueOf(user != null ? user.getPoints() : 0));
                 entry = StringUtils.replace(entry, "{POINTS-TO-LEVEL}", String.valueOf(user != null ? user.getPointsToNextLevel() : 0));
+                entry = StringUtils.replace(entry, "{POINTS-REQUIRED}", String.valueOf(user.getPointsRequired()));
                 return entry;
             }
         }

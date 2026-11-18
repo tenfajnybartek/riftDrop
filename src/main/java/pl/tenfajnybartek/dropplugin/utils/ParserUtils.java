@@ -1,90 +1,71 @@
 package pl.tenfajnybartek.dropplugin.utils;
 
-import net.kyori.adventure.text.Component;
-import org.bukkit.NamespacedKey;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
-import org.bukkit.inventory.meta.ItemMeta;
-import pl.tenfajnybartek.dropplugin.base.DropPlugin;
 
-import java.util.LinkedList;
-import java.util.List;
+import java.util.Arrays;
+import java.util.Locale;
 
 public final class ParserUtils {
     private ParserUtils() {}
 
-    public static ItemStack parseItemStack(final String string) {
-        if (string == null || string.isBlank()) return null;
-
-        final ItemStack is = new ItemStack(Material.DIAMOND);
-        final ItemMeta im = is.getItemMeta();
-
-        final String[] args = string.split(" ");
-        for (final String arg : args) {
-            if (arg == null || arg.isBlank()) continue;
-            final String[] splitArg = arg.split(":", 2);
-            if (splitArg.length < 2) continue;
-            final String key = splitArg[0].trim();
-            final String value = splitArg[1].trim();
-            if (key.equalsIgnoreCase("material")) {
-                final Material mat = Material.matchMaterial(value);
-                if (mat != null) {
-                    is.setType(mat);
+    public static ItemStack parseItemStack(String input) {
+        if (input == null || input.isBlank()) throw new IllegalArgumentException("Brakuje item.");
+        String[] options = input.trim().split("\\s+");
+        String materialName = Arrays.stream(options)
+                .filter(option -> option.regionMatches(true, 0, "material:", 0, 9))
+                .map(option -> option.substring(9)).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Brakuje material w item."));
+        Material material = Material.matchMaterial(materialName);
+        if (material == null || material.isAir() || !material.isItem()) {
+            throw new IllegalArgumentException("Nieznany lub niedozwolony materiał: " + materialName);
+        }
+        ItemStack item = new ItemStack(material);
+        var meta = item.getItemMeta();
+        for (String option : options) {
+            String[] pair = option.split(":", 2);
+            if (pair.length != 2) throw new IllegalArgumentException("Nieprawidłowa opcja item: " + option);
+            String value = pair[1];
+            switch (pair[0].toLowerCase(Locale.ROOT)) {
+                case "material" -> { }
+                case "amount" -> {
+                    if (Integer.parseInt(value) < 1) throw new IllegalArgumentException("item amount musi być dodatnie.");
+                    // Quantity is determined by the drop's amount range.
                 }
-            } else if (key.equalsIgnoreCase("amount")) {
-                try {
-                    int amt = Integer.parseInt(value);
-                    is.setAmount(Math.max(1, amt));
-                } catch (NumberFormatException ignored) {}
-            } else if (key.equalsIgnoreCase("name")) {
-                if (im != null) {
-                    Component comp = ChatUtils.toComponent(value.replace("_", " "));
-                    im.displayName(comp);
+                case "name" -> meta.displayName(ChatUtils.toComponent(value.replace('_', ' ')));
+                case "lore" -> meta.lore(Arrays.stream(value.split("@nl", -1))
+                        .map(line -> ChatUtils.toComponent(line.replace('_', ' '))).toList());
+                case "data", "durability" -> {
+                    if (!(meta instanceof Damageable damageable) || material.getMaxDurability() <= 0) {
+                        throw new IllegalArgumentException("Materiał nie obsługuje wytrzymałości.");
+                    }
+                    int damage = Integer.parseInt(value);
+                    if (damage < 0 || damage >= material.getMaxDurability()) {
+                        throw new IllegalArgumentException("Nieprawidłowa wartość uszkodzeń itemu: " + damage);
+                    }
+                    damageable.setDamage(damage);
                 }
-            } else if (key.equalsIgnoreCase("lore")) {
-                if (im != null) {
-                    List<Component> loreComp = new LinkedList<>();
-                    String[] splitLore = value.split("@nl");
-                    for (String s : splitLore) {
-                        loreComp.add(ChatUtils.toComponent(s.replace("_", " ")));
-                    }
-                    im.lore(loreComp);
-                }
-            } else if (key.equalsIgnoreCase("data") || key.equalsIgnoreCase("durability")) {
-                try {
-                    int data = Integer.parseInt(value);
-                    if (im instanceof Damageable) {
-                        ((Damageable) im).setDamage(data);
-                    }
-                } catch (NumberFormatException ignored) {}
-            } else if (key.equalsIgnoreCase("enchants")) {
-                String[] enchantmentArray = value.split("@nl");
-                for (String s : enchantmentArray) {
-                    if (s == null || s.isBlank()) continue;
-                    String[] enchantmentSplit = s.split(";", 2);
-                    if (enchantmentSplit.length < 2) continue;
-                    String enchKey = enchantmentSplit[0].trim();
-                    String levelStr = enchantmentSplit[1].trim();
-                    Enchantment ench = null;
-                    try {
-                        NamespacedKey nsKey = new NamespacedKey(DropPlugin.getPlugin(DropPlugin.class), enchKey);
-                        ench = Enchantment.getByKey(nsKey);
-                    } catch (Throwable t) {
-                        ench = Enchantment.getByName(enchKey.toUpperCase());
-                    }
-                    try {
-                        int level = Integer.parseInt(levelStr);
-                        if (ench != null && im != null) {
-                            im.addEnchant(ench, level, true);
+                case "enchants" -> {
+                    for (String token : value.split("@nl")) {
+                        String[] enchant = token.split(";", 2);
+                        if (enchant.length != 2) throw new IllegalArgumentException("Nieprawidłowy enchant: " + token);
+                        NamespacedKey key = NamespacedKey.fromString(enchant[0].toLowerCase(Locale.ROOT));
+                        Enchantment type = key == null ? null : Registry.ENCHANTMENT.get(key);
+                        if (type == null) throw new IllegalArgumentException("Nieznany enchant: " + enchant[0]);
+                        int level = Integer.parseInt(enchant[1]);
+                        if (level < 1 || level > 255 || !meta.addEnchant(type, level, true)) {
+                            throw new IllegalArgumentException("Nieprawidłowy lub powtórzony enchant: " + token);
                         }
-                    } catch (NumberFormatException ignored) {}
+                    }
                 }
+                default -> throw new IllegalArgumentException("Nieznane pole item: " + pair[0]);
             }
         }
-
-        if (im != null) is.setItemMeta(im);
-        return is;
+        item.setItemMeta(meta);
+        return item;
     }
 }

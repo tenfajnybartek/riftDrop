@@ -1,0 +1,93 @@
+gui:
+  name: "&6&lDrop ze Stone"
+  size: 36
+  filler:
+    name: "&r "
+    status: true
+    item: BLACK_STAINED_GLASS_PANE
+  status:
+    enable: "&aTak"
+    disable: "&cNie"
+  item:
+    name: "&e&l{NAME}"
+    enchanted: true
+    lores:
+      - " &8* &7Szansa: &6{CHANCE}% &7(+{CHANCE-BONUS}%) &e({CHANCE-SUM}%)"
+      - " &8* &7Wypada pomiedzy &6{HEIGHT-MIN} &7a &6{HEIGHT-MAX} &7poziomem."
+      - " &8* &7Wypada w ilosci od &6{AMOUNT-MIN} &7do &6{AMOUNT-MAX}&7."
+      - " &8* &7Wypada w ilosci od &6{POINTS-MIN} &7do &6{POINTS-MAX} &7punktow."
+      - " &8* &7Exp: &6{EXP}"
+      - " &8* &7Szczescie: {FORTUNE}"
+      - " &8* &7Wlaczony: {STATUS}"
+      - ""
+      - "&8* &7Wykopales juz: &6{MINED} &7szt."
+  locked:
+    # Wyświetlanie zablokowanych dropów (wymagany poziom gracza)
+    name: "&c&lZABLOKOWANY DROP"
+    item: BARRIER
+    lores:
+      - "&7Drop: &e{DROP-NAME}"
+      - " &8* &7Wymaga poziomu: &c{NEEDED-LEVEL}"
+      - " &8* &7Twój poziom: &a{PLAYER-LEVEL}"
+      - ""
+      - " &8* &cMusisz osiągnąć poziom &e{NEEDED-LEVEL} &caby odblokować!"
+  cobble:
+    name: "&6&lCobblestone"
+    status: true
+    item: COBBLESTONE
+    slot: 35
+    lores:
+      - " &8* &7Status: {STATUS}"
+      - " &8* &7Kliknij aby zmienic!"
+  messages:
+    name: "&6&lWiadomosci"
+    status: true
+    item: PAPER
+    slot: 34
+    lores:
+      - " &8* &7Status: {STATUS}"
+      - " &8* &7Kliknij aby zmienic!"
+  turbos:
+    name: "&6&lDostepne eventy"
+    status: true
+    item: DIAMOND_PICKAXE
+    slot: 33
+    lores:
+      - ""
+      - " &8* &7TurboDrop: {DROP-STATUS}"
+      - " &8* &7Pozostaly czas: &6{DROP-EXPIRE}"
+      - ""
+      - " &8* &7TurboDrop (Dla mnie): {ME-DROP-STATUS}"
+      - " &8* &7Pozostaly czas: &6{ME-DROP-EXPIRE}"
+      - ""
+      - " &8* &7TurboExp: {EXP-STATUS}"
+      - " &8* &7Pozostaly czas: &6{EXP-EXPIRE}"
+      - ""
+      - " &8* &7TurboExp (Dla mnie): {ME-EXP-STATUS}"
+      - " &8* &7Pozostaly czas: &6{ME-EXP-EXPIRE}"
+  level:
+    name: "&6&lDoswiadczenie"
+    status: true
+    item: EXPERIENCE_BOTTLE
+    slot: 32
+    lore:
+      - ""
+      - " &8* &7Aktualny level kopania: &6{LVL}"
+      - " &8* &7Aktualne punkty: &6{PKT}"
+      - " &8* &7Punkty do nastepnego levela: &e{POINTS-TO-LEVEL}"
+      - ""
+      - " &8* &7Punkty wymagane do następnego poziomu: &6{POINTS-REQUIRED}"
+  enable-all:
+    name: " &aWlacz wszystkie dropy!"
+    status: true
+    item: LIME_TERRACOTTA
+    slot: 27
+    lores:
+      - " &8* &7Kliknij aby zmienic!"
+  disable-all:
+    name: " &cWylacz wszystkie dropy!"
+    status: true
+    item: RED_TERRACOTTA
+    slot: 28
+    lores:
+      - " &8* &7Kliknij aby zmienic!"
