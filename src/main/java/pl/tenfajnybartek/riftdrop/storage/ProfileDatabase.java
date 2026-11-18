@@ -28,7 +28,7 @@ public final class ProfileDatabase {
     private final Logger logger;
     private final boolean sqlite;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(task -> {
-        Thread thread = new Thread(task, "RiftriftDrop-database");
+        Thread thread = new Thread(task, "riftDrop-database");
         thread.setDaemon(true);
         return thread;
     });
@@ -52,7 +52,7 @@ public final class ProfileDatabase {
         if (pool != null) return pool;
         if (retryAfter != 0 && System.nanoTime() - retryAfter < 0) throw new SQLException("Ponawianie połączenia z bazą za kilka sekund.");
         HikariConfig hikari = new HikariConfig();
-        hikari.setPoolName("RiftriftDrop-" + config.type());
+        hikari.setPoolName("riftDrop-" + config.type());
         hikari.setMaximumPoolSize(sqlite ? 1 : config.poolSize());
         hikari.setMinimumIdle(0);
         hikari.setConnectionTimeout(config.connectionTimeoutMs());

@@ -2,7 +2,7 @@
   <img src="docs/assets/riftdrop-logo.png" alt="Logo riftDrop — kamienna kostka z turkusową szczeliną" width="216">
   <h1>riftDrop</h1>
   <p>Konfigurowalne dropy i poziomy górnictwa dla serwerów Minecraft.</p>
-  <p><strong>1.1</strong> · Paper 1.21.x · Java 21</p>
+  <p><strong>1.2</strong> · Paper 26.3 · Java 25</p>
   <p>
     <a href="docs/installation.md">Instalacja i aktualizacja</a> ·
     <a href="docs/configuration.md">Konfiguracja</a> ·
@@ -22,11 +22,11 @@ Gracze mogą zdobywać dodatkowe przedmioty i punkty za kopanie kamienia, granit
 
 ## Szybki start
 
-1. Umieść `riftDrop-1.1.jar` w folderze `plugins/` na serwerze Paper 1.21.x uruchomionym na Javie 21.
+1. Umieść `riftDrop-1.2.jar` w folderze `plugins/` na serwerze Paper 26.3 uruchomionym na Javie 25.
 2. Uruchom serwer. Dostosuj `config.yml`, `drops.yml` i `gui.yml` w `plugins/riftDrop/`.
 3. Użyj `/adrop reload`, aby zastosować ustawienia gry. Zmiana ustawień bazy wymaga restartu.
 
-Aktualizujesz DropPlugin 1.0.0? Zatrzymaj serwer i wymień stary JAR. riftDrop skopiuje dane ze starego katalogu, jeśli katalog docelowy jest pusty. Szczegóły i procedura wycofania aktualizacji są w [instrukcji migracji](docs/installation.md#aktualizacja-z-dropplugin-100).
+Przy aktualizacji z riftDrop 1.1 użyjesz istniejącego katalogu `plugins/riftDrop/`. Dla DropPlugin 1.0.0 dostępna jest automatyczna kopia danych ze starego katalogu. Obie ścieżki opisuje [instrukcja instalacji i migracji](docs/installation.md).
 
 ## Dokumentacja
 
@@ -37,4 +37,4 @@ Aktualizujesz DropPlugin 1.0.0? Zatrzymaj serwer i wymień stary JAR. riftDrop s
 | Permisje, komendy, Turbo i PlaceholderAPI | [Komendy i integracje](docs/commands.md) |
 | Budowanie, testy i architektura | [Dokumentacja deweloperska](docs/development.md) |
 
-Następny planowany cel zgodności to **Paper 26.3 na Javie 25**.
+Poprzednie wydanie **riftDrop 1.1** jest przeznaczone dla Paper 1.21.x na Javie 21.

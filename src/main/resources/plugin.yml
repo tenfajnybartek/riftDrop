@@ -1,7 +1,7 @@
 name: riftDrop
 version: '${version}'
 main: pl.tenfajnybartek.riftdrop.RiftDropPlugin
-api-version: '1.21'
+api-version: '26.3'
 authors: [tenfajnybartek]
 description: Konfigurowalne dropy i progresja górnictwa dla Paper
 softdepend: [PlaceholderAPI]

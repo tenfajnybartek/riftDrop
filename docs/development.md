@@ -2,16 +2,16 @@
 
 [Wróć do README](../README.md)
 
-## Build na JDK 21
+## Build na JDK 25
 
-Ustaw `JAVA_HOME` na JDK 21. Repozytorium zawiera Gradle Wrapper.
+Ustaw `JAVA_HOME` na JDK 25. Repozytorium zawiera Gradle Wrapper 9.8.2.
 
 ```powershell
 .\gradlew.bat clean build
-.\gradlew.bat runServer -PminecraftVersion=1.21.11
+.\gradlew.bat runServer
 ```
 
-W systemach Linux i macOS użyj `./gradlew`. Zadanie `build` testuje kod i składa `build/libs/riftDrop-1.1.jar`. Biblioteki JDBC są dołączone do JAR-a, a Paper API i PlaceholderAPI są zależnościami kompilacji. Kod produkcyjny kompiluje się z `--release 21` przeciw Paper API 1.21.
+W systemach Linux i macOS użyj `./gradlew`. Zadanie `build` testuje kod i składa `build/libs/riftDrop-1.2.jar`. Zadanie `runServer` uruchamia deweloperski serwer Paper 26.3. Biblioteki JDBC są dołączone do JAR-a, a Paper API i PlaceholderAPI są zależnościami kompilacji. Kod produkcyjny kompiluje się z `--release 25` przeciw Paper API `26.3.build.255-stable`.
 
 ## Pakiety
 
@@ -25,6 +25,14 @@ W systemach Linux i macOS użyj `./gradlew`. Zadanie `build` testuje kod i skła
 | `command`, `integration`, `event` | Wejścia Bukkit, PlaceholderAPI oraz zdarzenia punktów i poziomu |
 
 Wątek serwera obsługuje graczy, inventory i eventy. Pojedynczy worker wykonuje operacje JDBC na kopiach profili. PlaceholderAPI odczytuje opublikowane dane, więc zwykłe wywołanie placeholdera nie inicjuje operacji SQL.
+
+## Weryfikacja wydania 1.2
+
+- Build i siedem testów automatycznych przeszły na JDK 25 i Gradle 9.8.2.
+- Na Paper 26.3 #255 sprawdzono start, inicjalizację SQLite, reload, Turbo i poprawne zatrzymanie.
+- Na tym samym Paper sprawdzono istniejący profil SQLite, GUI, kopanie, zużycie kilofa, późniejsze anulowanie zdarzenia, przepełnienie ekwipunku i ponowne wejście. Test z graczem korzystał z klienta testowego przez ViaProxy.
+- PlaceholderAPI 2.12.3 zwróciło dane gracza pod prefiksami `riftdrop` i `dropplugin`.
+- Test z MariaDB 11.8.8 i TLS `REQUIRED` objął migrację tabeli, zapis, ponowne połączenie i ranking.
 
 ## Weryfikacja wydania 1.1
 

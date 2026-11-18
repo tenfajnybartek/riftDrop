@@ -3,7 +3,8 @@ package pl.tenfajnybartek.riftdrop.mining;
 import org.bukkit.Material;
 import pl.tenfajnybartek.riftdrop.text.Messages;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Registry;
+import io.papermc.paper.registry.RegistryAccess;
+import io.papermc.paper.registry.RegistryKey;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
@@ -55,7 +56,8 @@ public final class ItemSpecParser {
                         String[] enchant = token.split(";", 2);
                         if (enchant.length != 2) throw new IllegalArgumentException("Nieprawidłowy enchant: " + token);
                         NamespacedKey key = NamespacedKey.fromString(enchant[0].toLowerCase(Locale.ROOT));
-                        Enchantment type = key == null ? null : Registry.ENCHANTMENT.get(key);
+                        Enchantment type = key == null ? null
+                                : RegistryAccess.registryAccess().getRegistry(RegistryKey.ENCHANTMENT).get(key);
                         if (type == null) throw new IllegalArgumentException("Nieznany enchant: " + enchant[0]);
                         int level = Integer.parseInt(enchant[1]);
                         if (level < 1 || level > 255 || !meta.addEnchant(type, level, true)) {
