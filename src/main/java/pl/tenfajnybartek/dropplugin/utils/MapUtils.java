@@ -1,57 +1,88 @@
 package pl.tenfajnybartek.dropplugin.utils;
 
+import java.io.*;
 import java.util.*;
 
 public final class MapUtils {
-    private MapUtils() {
+    private static final String PREFIX = "v2:";
+    private MapUtils() {}
+
+    public static String serializeList(Set<String> values) {
+        return encode(out -> {
+            for (String key : values) out.writeUTF(key);
+        });
     }
 
-    public static String serializeList(Set<String> set) {
-        if (set == null || set.isEmpty()) {
-            return "";
+    public static Set<String> deserializeList(String data) throws IOException {
+        if (data == null || data.isEmpty()) return Set.of();
+        Set<String> values = new HashSet<>();
+        try (DataInputStream input = decode(data)) {
+            while (input.available() > 0) values.add(input.readUTF());
         }
-        StringBuilder stringBuilder = new StringBuilder();
-        for (String string : set) {
-            stringBuilder.append(string).append("@");
-        }
-        return stringBuilder.length() > 0 ? stringBuilder.substring(0, stringBuilder.length() - 1) : "";
+        return values;
     }
 
-    public static Set<String> deserializeList(String serializedData) {
-        Set<String> set = new HashSet<>();
-        if (serializedData != null && !serializedData.isEmpty()) {
-            String[] split = serializedData.split("@");
-            Collections.addAll(set, split);
-        }
-        return set;
+    public static String serializeMap(Map<String, Integer> values) {
+        return encode(out -> {
+            for (var entry : values.entrySet()) {
+                out.writeUTF(entry.getKey());
+                out.writeInt(entry.getValue());
+            }
+        });
     }
 
-    public static String serializeMap(HashMap<String, Integer> map) {
-        if (map == null || map.isEmpty()) {
-            return "";
+    public static Map<String, Integer> deserializeMap(String data) throws IOException {
+        Map<String, Integer> values = new HashMap<>();
+        if (data == null || data.isEmpty()) return values;
+        try (DataInputStream input = decode(data)) {
+            while (input.available() > 0) values.put(input.readUTF(), input.readInt());
         }
-        StringBuilder stringBuilder = new StringBuilder();
-        for (Map.Entry<String, Integer> entry : map.entrySet()) {
-            stringBuilder.append(entry.getKey()).append("=").append(entry.getValue()).append("@");
-        }
-        return stringBuilder.length() > 0 ? stringBuilder.substring(0, stringBuilder.length() - 1) : "";
+        return values;
     }
 
-    public static HashMap<String, Integer> deserializeMap(String serializedData) {
-        HashMap<String, Integer> map = new HashMap<>();
-        if (serializedData != null && !serializedData.isEmpty()) {
-            String[] split = serializedData.split("@");
-            for (String string : split) {
-                String[] mapSplit = string.split("=");
-                if (mapSplit.length == 2) {
-                    try {
-                        map.put(mapSplit[0], Integer.parseInt(mapSplit[1]));
-                    } catch (NumberFormatException e) {
-                        e.printStackTrace();
-                    }
-                }
+    public static Set<String> legacyList(String data) {
+        if (data == null || data.isEmpty()) return Set.of();
+        Set<String> values = new HashSet<>();
+        for (String entry : data.split("@")) values.add("legacy:" + entry);
+        return values;
+    }
+
+    public static Map<String, Integer> legacyMap(String data) {
+        Map<String, Integer> values = new HashMap<>();
+        if (data == null || data.isEmpty()) return values;
+        for (String entry : data.split("@")) {
+            int separator = entry.lastIndexOf('=');
+            if (separator <= 0) continue;
+            try {
+                values.put("legacy:" + entry.substring(0, separator), Integer.parseInt(entry.substring(separator + 1)));
+            } catch (NumberFormatException invalid) {
+                // A malformed legacy counter cannot be reconstructed.
             }
         }
-        return map;
+        return values;
+    }
+
+    private static DataInputStream decode(String data) throws IOException {
+        if (!data.startsWith(PREFIX)) throw new IOException("Nieznany format profilu DropPlugin.");
+        try {
+            return new DataInputStream(new ByteArrayInputStream(Base64.getDecoder().decode(data.substring(PREFIX.length()))));
+        } catch (IllegalArgumentException failure) {
+            throw new IOException("Niepoprawny zapis profilu DropPlugin.", failure);
+        }
+    }
+
+    private static String encode(Encoder encoder) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream output = new DataOutputStream(bytes)) {
+            encoder.write(output);
+        } catch (IOException failure) {
+            throw new UncheckedIOException(failure);
+        }
+        return PREFIX + Base64.getEncoder().encodeToString(bytes.toByteArray());
+    }
+
+    @FunctionalInterface
+    private interface Encoder {
+        void write(DataOutputStream out) throws IOException;
     }
 }

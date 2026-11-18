@@ -6,15 +6,12 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import pl.tenfajnybartek.dropplugin.base.DropPlugin;
 import pl.tenfajnybartek.dropplugin.utils.ChatUtils;
-import pl.tenfajnybartek.dropplugin.utils.DropMenu;
 
 public class DropCommand implements CommandExecutor {
-    private final DropMenu dropMenu;
     private final DropPlugin plugin;
 
     public DropCommand(DropPlugin plugin) {
         this.plugin = plugin;
-        this.dropMenu = plugin.getDropMenu();
         if (plugin.getCommand("drop") != null) {
             plugin.getCommand("drop").setExecutor(this);
         } else {
@@ -35,7 +32,9 @@ public class DropCommand implements CommandExecutor {
         }
 
         Player player = (Player) sender;
-        player.openInventory(this.dropMenu.createInventory(player));
+        var user = plugin.getUserManager().getUser(player);
+        if (user == null) return ChatUtils.sendMessage(player, plugin.getPluginConfig().getCmdLevelPlayerDataError());
+        player.openInventory(plugin.getDropMenu().createInventory(player, user));
         return true;
     }
 }

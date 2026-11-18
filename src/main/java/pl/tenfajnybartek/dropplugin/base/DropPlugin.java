@@ -1,14 +1,16 @@
 package pl.tenfajnybartek.dropplugin.base;
 
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
-import org.bukkit.event.Listener;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import pl.tenfajnybartek.dropplugin.commands.ADropCommand;
 import pl.tenfajnybartek.dropplugin.commands.DropCommand;
 import pl.tenfajnybartek.dropplugin.commands.LevelCommand;
 import pl.tenfajnybartek.dropplugin.database.Database;
-import pl.tenfajnybartek.dropplugin.listeners.*;
+import pl.tenfajnybartek.dropplugin.listeners.BlockBreakListener;
+import pl.tenfajnybartek.dropplugin.listeners.InventoryClickListener;
+import pl.tenfajnybartek.dropplugin.listeners.PlayerJoinLeaveListener;
+import pl.tenfajnybartek.dropplugin.listeners.UserLevelChangeListener;
 import pl.tenfajnybartek.dropplugin.managers.ConfigManager;
 import pl.tenfajnybartek.dropplugin.managers.DropConfigManager;
 import pl.tenfajnybartek.dropplugin.managers.DropManager;
@@ -17,157 +19,86 @@ import pl.tenfajnybartek.dropplugin.tasks.ActionBarTask;
 import pl.tenfajnybartek.dropplugin.tasks.SaverTask;
 import pl.tenfajnybartek.dropplugin.utils.DropMenu;
 
-import java.util.logging.Logger;
+import java.io.IOException;
+import java.util.logging.Level;
 
-public class DropPlugin extends JavaPlugin {
-    private Logger logger;
+public final class DropPlugin extends JavaPlugin {
+    private record Settings(ConfigManager config, DropManager drops, DropMenu menu) {}
 
-    private UserManager userManager;
-    private DropManager dropManager;
+    private volatile Settings settings;
+    private Database.Settings databaseSettings;
     private Database database;
-    private ConfigManager configManager;
-    private DropConfigManager dropConfig;
-    private SaverTask saverTask;
-    private ActionBarTask actionBarTask;
-    private DropMenu dropMenu;
-    private boolean forceDisable = false;
+    private UserManager users;
+    private BukkitTask saver;
+    private BukkitTask actionBar;
+    private Runnable unregisterExpansion;
 
     @Override
     public void onEnable() {
-        this.logger = this.getLogger();
-
         try {
-            long startTime = System.currentTimeMillis();
-            this.logger.info("Initializacja pluginu tfbDrop...");
-
-            this.configManager = new ConfigManager(this);
-            this.dropConfig = new DropConfigManager(this);
-            this.userManager = new UserManager();
-            this.database = new Database(this);
-            this.dropManager = new DropManager(this);
-            this.dropMenu = new DropMenu(this);
-            this.saverTask = new SaverTask(this);
-            this.actionBarTask = new ActionBarTask(this);
-            registerListeners();
-            registerCommands();
+            reloadConfigManager();
+            databaseSettings = getPluginConfig().databaseSettings();
+            database = new Database(databaseSettings, getDataFolder(), getLogger());
+            users = new UserManager(database, this::getPluginConfig, () -> getDropManager().getDropList(), getLogger());
+            var manager = getServer().getPluginManager();
+            manager.registerEvents(new BlockBreakListener(this), this);
+            manager.registerEvents(new InventoryClickListener(this), this);
+            manager.registerEvents(new PlayerJoinLeaveListener(users), this);
+            manager.registerEvents(new UserLevelChangeListener(this), this);
+            new DropCommand(this);
+            new ADropCommand(this);
+            new LevelCommand(this);
             registerPlaceholderAPI();
-
-            this.logger.info("Zaladowano plugin tfbDrop w " + (double)(System.currentTimeMillis() - startTime) / 1000.0 + "s");
-        } catch (Throwable t) {
-            this.forceDisable = true;
-            logger.severe("Błąd podczas inicjalizacji pluginu tfbDrop: " + t.getMessage());
-            t.printStackTrace();
-            Bukkit.getPluginManager().disablePlugin(this);
+            saver = getServer().getScheduler().runTaskTimer(this, new SaverTask(users, database), 1L, 20L);
+            actionBar = getServer().getScheduler().runTaskTimer(this, new ActionBarTask(this), 20L, 20L);
+        } catch (Exception | LinkageError failure) {
+            getLogger().log(Level.SEVERE, "Nie udało się uruchomić DropPlugin.", failure);
+            getServer().getPluginManager().disablePlugin(this);
         }
     }
 
     @Override
-public void onDisable() {
-    if (forceDisable) {
-        logger.info("Shutdown przerwany (forceDisable=true).");
-        return;
-    }
-
-    logger.info("Wyłączanie pluginu tfbDrop...");
-
-    // 1. Zatrzymaj taski NAJPIERW
-    if (this.saverTask != null) {
-        this.saverTask.cancel();
-    }
-    if (this.actionBarTask != null) {
-        this.actionBarTask.cancel();
-    }
-
-    // 2. Zapisz graczy
-    if (this.userManager != null) {
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            try {
-                this.userManager.save(player.getUniqueId(), true);
-            } catch (Exception e) {
-                logger.warning("Błąd zapisu użytkownika " + player.getName() + ": " + e.getMessage());
-            }
-        }
-    }
-
-    // 3. Zamknij bazę danych NA KOŃCU
-    if (this.database != null) {
+    public void onDisable() {
+        if (saver != null) saver.cancel();
+        if (actionBar != null) actionBar.cancel();
         try {
-            this.database.disconnect(true);
-        } catch (Exception e) {
-            logger.warning("Błąd zamykania bazy: " + e.getMessage());
+            if (unregisterExpansion != null) unregisterExpansion.run();
+        } catch (Exception | LinkageError failure) {
+            getLogger().log(Level.WARNING, "Nie udało się wyrejestrować integracji PlaceholderAPI.", failure);
+        }
+        try {
+            if (users != null) users.save();
+        } finally {
+            if (database != null) database.close();
         }
     }
 
-    logger.info("Plugin tfbDrop wyłączony pomyślnie.");
-}
-
-    private void registerListeners() {
-    Listener[] listeners = {
-        new BlockBreakListener(this),
-        new InventoryClickListener(this),
-        new PlayerJoinLeaveListener(this),
-        new UserLevelChangeListener(this),
-        new UserPointsChangeListener(this)
-    };
-
-    for (Listener listener : listeners) {
-        Bukkit.getPluginManager().registerEvents(listener, this);
-    }
-}
-
-    private void registerCommands() {
-        new DropCommand(this);
-        new ADropCommand(this);
-        new LevelCommand(this);
-    }
-    
     private void registerPlaceholderAPI() {
-        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            try {
-                new pl.tenfajnybartek.dropplugin.integrations.DropPluginExpansion(this).register();
-                this.logger.info("Zarejestrowano PlaceholderAPI expansion!");
-                this.logger.info("Dostępne placeholdery: %dropplugin_level%, %dropplugin_points%, %dropplugin_points_required%, %dropplugin_points_to_next%, %dropplugin_toplevel-x%");
-            } catch (Exception e) {
-                this.logger.warning("Nie udało się zarejestrować PlaceholderAPI expansion: " + e.getMessage());
-            }
-        } else {
-            this.logger.info("PlaceholderAPI nie znalezione - placeholdery nie będą dostępne.");
+        if (!getServer().getPluginManager().isPluginEnabled("PlaceholderAPI")) return;
+        try {
+            var expansion = new pl.tenfajnybartek.dropplugin.integrations.DropPluginExpansion(this);
+            if (expansion.register()) unregisterExpansion = () -> expansion.unregister();
+            else getLogger().warning("PlaceholderAPI odrzuciło rejestrację DropPlugin.");
+        } catch (Exception | LinkageError failure) {
+            getLogger().log(Level.WARNING, "Integracja PlaceholderAPI jest niedostępna.", failure);
         }
     }
 
-    public UserManager getUserManager() {
-        return this.userManager;
-    }
-
-    public DropManager getDropManager() {
-        return this.dropManager;
-    }
-
-    public DropConfigManager getDropConfig() {
-        return this.dropConfig;
-    }
-
-    public DropMenu getDropMenu() {
-        return this.dropMenu;
-    }
-
-    public Database getDatabase() {
-        return this.database;
-    }
-
-    public ConfigManager getConfigManager() {
-        return this.configManager;
-    }
-    public void reloadConfigManager() {
-        this.configManager = new ConfigManager(this);
-
-        if (this.actionBarTask != null) {
-            this.actionBarTask.cancel();
-            this.actionBarTask = null;
+    public void reloadConfigManager() throws IOException, InvalidConfigurationException {
+        ConfigManager config = new ConfigManager(this);
+        DropManager drops = new DropManager(this, config, new DropConfigManager(this));
+        DropMenu menu = new DropMenu(config, drops);
+        if (users != null) users.migrateOnlineDrops();
+        settings = new Settings(config, drops, menu);
+        if (users != null) users.migrateOnlineDrops();
+        if (databaseSettings != null && !databaseSettings.equals(config.databaseSettings())) {
+            getLogger().warning("Zmieniono ustawienia bazy. Zaczną obowiązywać po restarcie serwera.");
         }
-        this.actionBarTask = new ActionBarTask(this);
     }
-    public ConfigManager getPluginConfig() {
-        return this.configManager;
-    }
+
+    public UserManager getUserManager() { return users; }
+    public Database getDatabase() { return database; }
+    public ConfigManager getPluginConfig() { return settings.config(); }
+    public DropManager getDropManager() { return settings.drops(); }
+    public DropMenu getDropMenu() { return settings.menu(); }
 }

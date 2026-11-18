@@ -3,209 +3,163 @@ package pl.tenfajnybartek.dropplugin.managers;
 import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Player;
 import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.inventory.ItemStack;
 import pl.tenfajnybartek.dropplugin.base.DropPlugin;
-import pl.tenfajnybartek.dropplugin.objects.Chance;
 import pl.tenfajnybartek.dropplugin.objects.Count;
 import pl.tenfajnybartek.dropplugin.objects.Drop;
 import pl.tenfajnybartek.dropplugin.objects.User;
 import pl.tenfajnybartek.dropplugin.utils.ChatUtils;
 import pl.tenfajnybartek.dropplugin.utils.ItemUtils;
 import pl.tenfajnybartek.dropplugin.utils.ParserUtils;
-import pl.tenfajnybartek.dropplugin.utils.RandomUtils;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
-public class DropManager {
-    private final UserManager userManager;
-    private final List<Drop> dropList;
+public final class DropManager {
+    private static final Set<Material> STONE_LIKE = EnumSet.of(
+            Material.STONE, Material.GRANITE, Material.DIORITE, Material.ANDESITE, Material.DEEPSLATE);
+
+    private final DropPlugin plugin;
     private final ConfigManager config;
+    private final List<Drop> dropList;
     private final int stoneExp;
     private final int obsidianExp;
 
-    public DropManager(DropPlugin plugin) {
-        this.userManager = plugin.getUserManager();
-        this.dropList = new ArrayList<>();
-        this.config = plugin.getConfigManager();
-        DropConfigManager dropConfig = plugin.getDropConfig();
-
-        FileConfiguration dropCfg = dropConfig != null ? dropConfig.getDropConfig() : null;
-        this.stoneExp = dropCfg != null ? dropCfg.getInt("exps.stone", 0) : 0;
-        this.obsidianExp = dropCfg != null ? dropCfg.getInt("exps.obsidian", 0) : 0;
-
-        if (dropCfg != null) {
-            ConfigurationSection dropsSection = dropCfg.getConfigurationSection("drops");
-            if (dropsSection != null) {
-                for (String id : dropsSection.getKeys(false)) {
-                    ConfigurationSection section = dropsSection.getConfigurationSection(id);
-                    if (section == null) continue;
-                    Count amount = Count.parse(section.getString("amount", "1-2"));
-                    Count height = Count.parse(section.getString("height", "0-90"));
-                    Count points = Count.parse(section.getString("points", "3-7"));
-                    double chance = section.getDouble("chance", 5.0);
-                    boolean fortune = section.getBoolean("fortune", true);
-                    int exp = section.getInt("exp", 3);
-                    int neededLevel = section.getInt("neededlvl", 0);
-                    ItemStack itemStack = ParserUtils.parseItemStack(section.getString("item"));
-                    if (itemStack == null) {
-                        itemStack = new ItemStack(Material.STONE);
-                    }
-                    String name = section.getString("name", "Drop");
-                    Drop drop = new Drop(name, fortune, itemStack, chance, height, amount, points, exp, neededLevel);
-                    this.addDrop(drop);
+    public DropManager(DropPlugin plugin, ConfigManager config, DropConfigManager dropConfig) {
+        this.plugin = plugin;
+        this.config = config;
+        var yaml = dropConfig.getDropConfig();
+        this.stoneExp = nonNegative(yaml, "exps.stone", 0);
+        this.obsidianExp = nonNegative(yaml, "exps.obsidian", 0);
+        var drops = yaml.getConfigurationSection("drops");
+        if (drops == null) throw new IllegalArgumentException("drops.yml: brakuje sekcji drops.");
+        List<Drop> parsed = new ArrayList<>();
+        for (String id : drops.getKeys(false)) {
+            try {
+                var entry = drops.getConfigurationSection(id);
+                if (entry == null) throw new IllegalArgumentException("Wpis musi być sekcją.");
+                Count amount = Count.parse(entry.getString("amount", "1-2"));
+                Count height = Count.parse(entry.getString("height", "0-90"));
+                Count points = Count.parse(entry.getString("points", "3-7"));
+                if (amount.getMin() < 1 || amount.getMax() > 4096 || points.getMin() < 0) {
+                    throw new IllegalArgumentException("amount musi być w zakresie 1–4096, a points nieujemne.");
                 }
+                if (entry.contains("chance") && !(entry.get("chance") instanceof Number)) {
+                    throw new IllegalArgumentException("chance musi być liczbą.");
+                }
+                if (entry.contains("fortune") && !entry.isBoolean("fortune")) {
+                    throw new IllegalArgumentException("fortune musi mieć wartość true lub false.");
+                }
+                parsed.add(new Drop(id, entry.getString("name", id), entry.getBoolean("fortune", true),
+                        ParserUtils.parseItemStack(entry.getString("item")), entry.getDouble("chance", 5.0),
+                        height, amount, points, nonNegative(entry, "exp", 3), nonNegative(entry, "neededlvl", 0)));
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("drops.yml: drops." + id + ": " + failure.getMessage(), failure);
             }
         }
+        this.dropList = List.copyOf(parsed);
     }
 
-    public void addDrop(Drop drop) {
-        if (drop == null) return;
-        this.dropList.add(drop);
+    private static int nonNegative(ConfigurationSection section, String key, int fallback) {
+        if (section.contains(key) && !section.isInt(key)) throw new IllegalArgumentException(key + " musi być liczbą całkowitą.");
+        int value = section.getInt(key, fallback);
+        if (value < 0) throw new IllegalArgumentException(key + " musi być nieujemne.");
+        return value;
+    }
+
+    public double permissionBonus(Player player) {
+        return config.getChances().values().stream()
+                .filter(chance -> player.hasPermission(chance.getPerm()))
+                .mapToDouble(chance -> chance.getChance() / 100.0)
+                .sum();
+    }
+
+    public double effectiveChance(Drop drop, double bonus, User user) {
+        int multiplier = config.isTurboDrop() || user.isTurboDrop() ? 2 : 1;
+        return Math.clamp((drop.getChance() + bonus) * multiplier, 0.0, 1.0);
     }
 
     public void breakBlock(BlockBreakEvent event) {
-        if (event == null || event.isCancelled()) return;
-        if (event.getPlayer() == null || event.getPlayer().getGameMode() != GameMode.SURVIVAL) return;
-
-        User user = this.userManager.getUser(event.getPlayer());
-        if (user == null) {
-            return;
-        }
-
         Block block = event.getBlock();
-        Material originalMaterial = block.getType();
-        ItemStack tool = event.getPlayer().getInventory().getItemInMainHand();
+        Material material = block.getType();
+        boolean obsidian = material == Material.OBSIDIAN;
+        if (!obsidian && !STONE_LIKE.contains(material)) return;
+        Player player = event.getPlayer();
+        if (!event.isDropItems() || player.getGameMode() != GameMode.SURVIVAL) return;
+        ItemStack tool = player.getInventory().getItemInMainHand();
+        if (!block.isPreferredTool(tool)) return;
 
-        if (originalMaterial == Material.OBSIDIAN) {
-            int give = this.obsidianExp;
-            if (this.config.isTurboExp() || user.isTurboExp()) give *= 2;
-            event.getPlayer().giveExp(give);
-            return;
-        }
+        User user = plugin.getUserManager().getUser(player);
+        if (user == null) return;
+        int expMultiplier = config.isTurboExp() || user.isTurboExp() ? 2 : 1;
+        long xpToDrop = event.getExpToDrop() + (long) (obsidian ? obsidianExp : stoneExp) * expMultiplier;
+        event.setExpToDrop(saturate(xpToDrop));
+        if (obsidian) return;
 
-        boolean isStoneLike = originalMaterial == Material.STONE ||
-                originalMaterial == Material.GRANITE ||
-                originalMaterial == Material.DIORITE ||
-                originalMaterial == Material.ANDESITE ||
-                originalMaterial == Material.DEEPSLATE;
-
-        if (isStoneLike) {
-            int give = this.stoneExp;
-            if (this.config.isTurboExp() || user.isTurboExp()) give *= 2;
-            event.getPlayer().giveExp(give);
-
-            event.setCancelled(true);
-            block.setType(Material.AIR);
-
-            if (user.isCobble()) {
-                ItemStack item;
-                boolean hasSilk = tool != null && tool.containsEnchantment(Enchantment.SILK_TOUCH);
-                if (hasSilk) {
-                    item = new ItemStack(originalMaterial);
-                } else {
-                    item = new ItemStack(Material.COBBLESTONE);
-                }
-                ItemUtils.giveItem(user.getPlayer(), item);
+        var vanillaDrops = user.isCobble() ? block.getDrops(tool, player) : List.<ItemStack>of();
+        var source = block.getLocation().add(0.5, 0.5, 0.5);
+        int height = block.getY();
+        int fortune = tool.getEnchantmentLevel(Enchantment.FORTUNE);
+        event.setDropItems(false);
+        plugin.getServer().getScheduler().runTask(plugin, () -> {
+            // Later protection listeners may still have cancelled the original break.
+            if (event.isCancelled() || event.isDropItems()) return;
+            if (!player.isOnline() || plugin.getUserManager().getUser(player) != user) {
+                vanillaDrops.forEach(item -> source.getWorld().dropItemNaturally(source, item));
+                return;
             }
 
-            double playerY = 0;
-            if (event.getPlayer().getLocation() != null) {
-                playerY = event.getPlayer().getLocation().getY();
-            }
-            
-            for (Drop drop : this.dropList) {
-                if (drop == null || user.isDisabled(drop)) continue;
+            vanillaDrops.forEach(item -> ItemUtils.giveItem(player, source, item, item.getAmount(), config));
+            double bonus = permissionBonus(player);
+            int levelAtBreak = user.getLvl();
+            for (Drop drop : dropList) {
+                if (user.isDisabled(drop) || !drop.isUnlocked(levelAtBreak)) continue;
+                Count range = drop.getHeight();
+                if (height < range.getMin() || height > range.getMax()) continue;
+                if (ThreadLocalRandom.current().nextDouble() >= effectiveChance(drop, bonus, user)) continue;
 
-                if (!drop.isUnlocked(user.getLvl())) continue;
-                
-                Count h = drop.getHeight();
-                if (h != null) {
-                    if (playerY > h.getMax() || playerY < h.getMin()) continue;
-                }
-
-                double chance = drop.getChance();
-
-                for (Chance permChance : this.config.getChances().values()) {
-                    if (user.getPlayer() != null && user.getPlayer().hasPermission(permChance.getPerm())) {
-                        Double c = permChance.getChance();
-                        if (c != null) {
-                            double bonus = c / 100.0;
-                            chance += bonus;
-                        }
-                    }
-                }
-
-                if (this.config.isTurboDrop() || user.isTurboDrop()) {
-                    chance = Math.min(chance * 2.0, 1.0);
-                }
-
-                if (drop.isFortune() && tool != null) {
-                    int fortuneLevel = tool.getEnchantments().getOrDefault(Enchantment.FORTUNE, 0);
-                    if (fortuneLevel > 0) {
-                        chance = Math.min(chance + (fortuneLevel * 0.10), 1.0);
-                    }
-                }
-
-                if (!RandomUtils.getChance(chance)) continue;
-
-                if (tool != null) {
-                    ItemUtils.recalculateDurability(event.getPlayer(), tool);
-                }
-
-                int amount = drop.getAmount() != null ? drop.getAmount().random() : 1;
-
-                if (drop.isFortune() && tool != null) {
-                    int fortuneLevel = tool.getEnchantments().getOrDefault(Enchantment.FORTUNE, 0);
-                    if (fortuneLevel > 0) {
-                        int bonus = 0;
-                        double bonusChance = RandomUtils.RANDOM_INSTANCE.nextDouble();
-                        
-                        if (fortuneLevel == 1) {
-                            if (bonusChance < 0.33) bonus = 1;
-                        } else if (fortuneLevel == 2) {
-                            if (bonusChance < 0.50) {
-                                bonus = RandomUtils.getRandInt(1, 2);
-                            }
-                        } else if (fortuneLevel >= 3) {
-                            if (bonusChance < 0.60) {
-                                bonus = RandomUtils.getRandInt(1, 3);
-                            }
-                        }
-                        
-                        amount += bonus;
-                    }
-                }
-                int exp = drop.getExp() * amount;
-                if (this.config.isTurboExp() || user.isTurboExp()) exp *= 2;
-                event.getPlayer().giveExp(exp);
-
-                int points = drop.getPoints() != null ? drop.getPoints().random() : 0;
-                points *= amount;
-
-                if (user.isMessages()) {
-                    String msg = this.config.getDropMessage()
-                            .replace("{PKT}", String.valueOf(points))
-                            .replace("{EXP}", String.valueOf(exp))
-                            .replace("{AMOUNT}", String.valueOf(amount))
-                            .replace("{DROP}", drop.getName());
-                    ChatUtils.sendMessage(event.getPlayer(), msg);
-                }
-
-                user.addPoints(points);
+                // Fortune follows the quantity rules documented in drops.yml.
+                int amount = drop.getAmount().random() + (drop.isFortune() ? fortuneBonus(fortune) : 0);
+                int xp = saturate((long) drop.getExp() * amount * expMultiplier);
+                int points = config.isLvlStatus() ? saturate((long) drop.getPoints().random() * amount) : 0;
+                ItemStack reward = drop.getItemStack();
+                ItemUtils.giveItem(player, source, reward, amount, config);
+                if (xp > 0) player.giveExp(xp);
                 user.addDrop(drop, amount);
-                ItemStack toGive = drop.getItemStack().clone();
-                toGive.setAmount(amount);
-                ItemUtils.giveItem(event.getPlayer(), toGive);
+                int addedPoints = user.addPoints(points);
+                if (user.isMessages()) {
+                    ChatUtils.sendMessage(player, config.getDropMessage()
+                            .replace("{PKT}", String.valueOf(addedPoints))
+                            .replace("{EXP}", String.valueOf(xp))
+                            .replace("{AMOUNT}", String.valueOf(amount))
+                            .replace("{DROP}", drop.getName()));
+                }
             }
-        }
+        });
+    }
+
+    private static int fortuneBonus(int level) {
+        if (level <= 0) return 0;
+        var random = ThreadLocalRandom.current();
+        return switch (level) {
+            case 1 -> random.nextDouble() < 0.33 ? 1 : 0;
+            case 2 -> random.nextDouble() < 0.50 ? random.nextInt(1, 3) : 0;
+            default -> random.nextDouble() < 0.60 ? random.nextInt(1, 4) : 0;
+        };
+    }
+
+    private static int saturate(long value) {
+        return (int) Math.min(value, Integer.MAX_VALUE);
     }
 
     public List<Drop> getDropList() {
-        return this.dropList;
+        return dropList;
     }
 }

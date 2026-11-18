@@ -2,21 +2,24 @@ package pl.tenfajnybartek.dropplugin.commands;
 
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
+import org.bukkit.command.TabExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.logging.Level;
 import pl.tenfajnybartek.dropplugin.base.DropPlugin;
 import pl.tenfajnybartek.dropplugin.managers.UserManager;
 import pl.tenfajnybartek.dropplugin.objects.User;
 import pl.tenfajnybartek.dropplugin.utils.ChatUtils;
 import pl.tenfajnybartek.dropplugin.utils.DataUtils;
 
-public class ADropCommand implements CommandExecutor {
+public class ADropCommand implements TabExecutor {
 
     private static final int MIN_LEVEL = 1;
-    private static final int MAX_LEVEL = 1000;
     private static final int MIN_POINTS = 0;
-    private static final int MAX_POINTS = 1000000;
     
     private final UserManager userManager;
     private final DropPlugin plugin;
@@ -27,6 +30,7 @@ public class ADropCommand implements CommandExecutor {
 
         if (plugin.getCommand("adrop") != null) {
             plugin.getCommand("adrop").setExecutor(this);
+            plugin.getCommand("adrop").setTabCompleter(this);
         } else {
             plugin.getLogger().warning("Command 'adrop' not defined in plugin.yml");
         }
@@ -46,7 +50,7 @@ public class ADropCommand implements CommandExecutor {
             return true;
         }
 
-        String sub = args[0].toLowerCase();
+        String sub = args[0].toLowerCase(Locale.ROOT);
         switch (sub) {
             case "reload": {
                 long start = System.currentTimeMillis();
@@ -55,10 +59,9 @@ public class ADropCommand implements CommandExecutor {
                     this.plugin.reloadConfigManager();
                     float time = (float) (System.currentTimeMillis() - start) / 1000.0f;
                     ChatUtils.sendMessage(sender, config.getCmdADropReloaded().replace("{TIME}", String.valueOf(time)));
-                } catch (Throwable t) {
+                } catch (Exception t) {
                     ChatUtils.sendMessage(sender, config.getCmdADropReloadError());
-                    this.plugin.getLogger().severe("Error while reloading config: " + t.getMessage());
-                    t.printStackTrace();
+                    this.plugin.getLogger().log(Level.WARNING, "Przeładowanie konfiguracji nie powiodło się.", t);
                 }
                 return true;
             }
@@ -81,12 +84,12 @@ public class ADropCommand implements CommandExecutor {
                 String typeName = isDrop ? "TurboDrop" : "TurboExp";
 
                 if ("all".equalsIgnoreCase(target)) {
-                    if (isDrop) {
-                        config.addTurboDrop(time);
-                        config.save();
-                    } else {
-                        config.addTurboExp(time);
-                        config.save();
+                    try {
+                        config.saveTurbo(isDrop, time);
+                    } catch (Exception failure) {
+                        ChatUtils.sendMessage(sender, "&cNie udało się zapisać czasu turbo.");
+                        plugin.getLogger().log(Level.WARNING, "Nie udało się zapisać czasu turbo.", failure);
+                        return true;
                     }
 
                     String broadcast = config.getTurboMessage()
@@ -100,7 +103,7 @@ public class ADropCommand implements CommandExecutor {
                     return true;
                 }
 
-                Player targetPlayer = Bukkit.getPlayer(target);
+                Player targetPlayer = Bukkit.getPlayerExact(target);
                 if (targetPlayer == null) {
                     ChatUtils.sendMessage(sender, config.getCmdADropPlayerOffline());
                     return true;
@@ -134,14 +137,15 @@ public class ADropCommand implements CommandExecutor {
 
                 String targetName = args[1];
                 int newLevel;
+                int maxLevel = config.getMaxLevel();
                 int newPoints = 0;
 
                 try {
                     newLevel = Integer.parseInt(args[2]);
-                    if (newLevel < MIN_LEVEL || newLevel > MAX_LEVEL) {
+                    if (newLevel < MIN_LEVEL || newLevel > maxLevel) {
                         ChatUtils.sendMessage(sender, config.getCmdADropLevelMinMax()
                                 .replace("{MIN}", String.valueOf(MIN_LEVEL))
-                                .replace("{MAX}", String.valueOf(MAX_LEVEL)));
+                                .replace("{MAX}", String.valueOf(maxLevel)));
                         return true;
                     }
                 } catch (NumberFormatException e) {
@@ -149,13 +153,14 @@ public class ADropCommand implements CommandExecutor {
                     return true;
                 }
 
+                int maxPoints = Math.max(0, User.pointsRequired(newLevel, config) - 1);
                 if (args.length >= 4) {
                     try {
                         newPoints = Integer.parseInt(args[3]);
-                        if (newPoints < MIN_POINTS || newPoints > MAX_POINTS) {
+                        if (newPoints < MIN_POINTS || newPoints > maxPoints) {
                             ChatUtils.sendMessage(sender, config.getCmdADropPointsMinMax()
                                     .replace("{MIN}", String.valueOf(MIN_POINTS))
-                                    .replace("{MAX}", String.valueOf(MAX_POINTS)));
+                                    .replace("{MAX}", String.valueOf(maxPoints)));
                             return true;
                         }
                     } catch (NumberFormatException e) {
@@ -164,7 +169,7 @@ public class ADropCommand implements CommandExecutor {
                     }
                 }
 
-                Player targetPlayer = Bukkit.getPlayer(targetName);
+                Player targetPlayer = Bukkit.getPlayerExact(targetName);
                 if (targetPlayer == null) {
                     ChatUtils.sendMessage(sender, config.getCmdADropPlayerOffline());
                     return true;
@@ -177,8 +182,7 @@ public class ADropCommand implements CommandExecutor {
                 }
 
                 int currentLevel = targetUser.getLvl();
-                targetUser.setLvl(newLevel);
-                targetUser.setPoints(newPoints);
+                targetUser.setProgress(newLevel, newPoints);
 
                 ChatUtils.sendMessage(sender, config.getCmdADropLevelChanged()
                         .replace("{PLAYER}", targetPlayer.getName())
@@ -193,5 +197,25 @@ public class ADropCommand implements CommandExecutor {
                 return true;
             }
         }
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (!sender.hasPermission("dropplugin.cmd.adrop")) return List.of();
+        List<String> choices = new ArrayList<>();
+        if (args.length == 1) {
+            choices.addAll(List.of("reload", "drop", "exp", "level"));
+        } else if (args.length == 2) {
+            String action = args[0].toLowerCase(Locale.ROOT);
+            if (!List.of("drop", "exp", "level").contains(action)) return List.of();
+            if (!action.equals("level")) choices.add("all");
+            Bukkit.getOnlinePlayers().forEach(player -> {
+                if (!(sender instanceof Player viewer) || viewer.canSee(player)) choices.add(player.getName());
+            });
+        } else {
+            return List.of();
+        }
+        String prefix = args[args.length - 1].toLowerCase(Locale.ROOT);
+        return choices.stream().filter(choice -> choice.toLowerCase(Locale.ROOT).startsWith(prefix)).sorted().toList();
     }
 }

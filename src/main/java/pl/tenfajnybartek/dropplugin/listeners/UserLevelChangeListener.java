@@ -11,10 +11,10 @@ import pl.tenfajnybartek.dropplugin.utils.ChatUtils;
 import pl.tenfajnybartek.dropplugin.events.UserLevelChangeEvent;
 
 public class UserLevelChangeListener implements Listener {
-    private final ConfigManager config;
+    private final DropPlugin plugin;
 
     public UserLevelChangeListener(DropPlugin plugin) {
-        this.config = plugin.getPluginConfig();
+        this.plugin = plugin;
     }
 
     @EventHandler
@@ -23,22 +23,23 @@ public class UserLevelChangeListener implements Listener {
         if (player == null) return;
         
         int lvl = event.getLevel();
+        ConfigManager config = plugin.getPluginConfig();
 
-        if (lvl == this.config.getMaxLevel()) {
-            String msgAll = this.config.getMaxLevelMessage()
+        if (lvl == config.getMaxLevel()) {
+            String msgAll = config.getMaxLevelMessage()
                     .replace("{PLAYER}", player.getName())
                     .replace("{LVL}", String.valueOf(lvl));
             Bukkit.getOnlinePlayers().forEach(all -> ChatUtils.sendMessage(all, msgAll));
-        } else if (this.config.getChatLevels().contains(lvl)) {
-            String msgAll = this.config.getLevelMessage()
+        } else if (config.getChatLevels().contains(lvl)) {
+            String msgAll = config.getLevelMessage()
                     .replace("{PLAYER}", player.getName())
                     .replace("{LVL}", String.valueOf(lvl));
             Bukkit.getOnlinePlayers().forEach(all -> ChatUtils.sendMessage(all, msgAll));
         }
 
-        String personal = this.config.getLvlUpMessage()
+        String personal = config.getLvlUpMessage()
                 .replace("{LVL}", String.valueOf(lvl))
-                .replace("{POINTS}", String.valueOf(lvl * this.config.getPointsToLvlUp()));
+                .replace("{POINTS}", String.valueOf(event.getUser().getPointsRequired()));
         ChatUtils.sendMessage(player, personal);
 
         if (player.getLocation() != null && player.getWorld() != null) {

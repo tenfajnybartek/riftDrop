@@ -1,5 +1,5 @@
 name: DropPlugin
-version: '1.0.0-SNAPSHOT'
+version: '${version}'
 main: pl.tenfajnybartek.dropplugin.base.DropPlugin
 api-version: '1.21'
 authors: [tenfajnybartek]
@@ -15,3 +15,12 @@ commands:
   level:
     aliases: [ "poziom", "lvl" ]
     description: "Pokazuje aktualny poziom gracza"
+permissions:
+  dropplugin.cmd.drop:
+    default: true
+  dropplugin.cmd.level:
+    default: true
+  dropplugin.cmd.alevel:
+    default: op
+  dropplugin.cmd.adrop:
+    default: op

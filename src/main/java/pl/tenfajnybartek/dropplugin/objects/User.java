@@ -5,173 +5,167 @@ import org.bukkit.entity.Player;
 import pl.tenfajnybartek.dropplugin.events.UserLevelChangeEvent;
 import pl.tenfajnybartek.dropplugin.events.UserPointsChangeEvent;
 import pl.tenfajnybartek.dropplugin.managers.ConfigManager;
-import pl.tenfajnybartek.dropplugin.utils.MapUtils;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.function.Supplier;
 
-public class User {
-    private HashMap<String, Integer> minedDrops;
+public final class User {
+    public record Profile(UUID id, String name, boolean cobble, boolean messages, long turboDrop, long turboExp,
+                          int level, long points, Map<String, Integer> minedDrops, Set<String> disabledDrops) {
+        public Profile {
+            minedDrops = Map.copyOf(minedDrops);
+            disabledDrops = Set.copyOf(disabledDrops);
+        }
+
+        public static Profile initial(UUID id) {
+            return new Profile(id, null, true, true, 0, 0, 1, 0, Map.of(), Set.of());
+        }
+    }
+
+    private final UUID identifier;
+    private String name;
+    private final Supplier<ConfigManager> settings;
+    private final Map<String, Integer> minedDrops;
     private final Set<String> disabledDrops;
     private boolean cobble;
     private boolean messages;
-    private final UUID identifier;
     private long turboDrop;
     private long turboExp;
     private int points;
-    private int lvl;
+    private int level;
+    private boolean dirty;
 
-    public User(Player player) {
-        this.identifier = player.getUniqueId();
-        this.cobble = true;
-        this.messages = true;
-        this.disabledDrops = new HashSet<>();
-        this.minedDrops = new HashMap<>();
-        this.turboDrop = 0L;
-        this.turboExp = 0L;
-        this.lvl = 1;
-        this.points = 0;
+    public User(Profile profile, Supplier<ConfigManager> settings) {
+        this.identifier = profile.id();
+        this.name = profile.name();
+        this.settings = settings;
+        this.minedDrops = new HashMap<>(profile.minedDrops());
+        this.disabledDrops = new HashSet<>(profile.disabledDrops());
+        this.cobble = profile.cobble();
+        this.messages = profile.messages();
+        this.turboDrop = profile.turboDrop();
+        this.turboExp = profile.turboExp();
+        this.level = Math.max(1, profile.level());
+        this.points = (int) Math.clamp(profile.points(), 0, Integer.MAX_VALUE);
     }
 
-    public User(ResultSet resultSet) throws SQLException {
-        this.identifier = UUID.fromString(resultSet.getString("identifier"));
-        this.cobble = resultSet.getBoolean("cobble");
-        this.messages = resultSet.getBoolean("messages");
-        this.turboDrop = resultSet.getLong("turboDrop");
-        this.turboExp = resultSet.getLong("turboExp");
-        this.lvl = resultSet.getInt("lvl");
-        this.points = resultSet.getInt("points");
-        this.minedDrops = MapUtils.deserializeMap(resultSet.getString("minedDrops"));
-        this.disabledDrops = MapUtils.deserializeList(resultSet.getString("disabledDrops"));
+    public Profile snapshot() {
+        return new Profile(identifier, name, cobble, messages, turboDrop, turboExp, level, points, minedDrops, disabledDrops);
     }
 
-    public UUID getIdentifier() {
-        return this.identifier;
+    public void rememberName(String name) {
+        if (!Objects.equals(this.name, name)) {
+            this.name = name;
+            dirty = true;
+        }
     }
 
-    public boolean isCobble() {
-        return this.cobble;
+    public Profile takeChangedSnapshot() {
+        if (!dirty) return null;
+        dirty = false;
+        return snapshot();
     }
 
-    public boolean isMessages() {
-        return this.messages;
+    public void migrateDrops(List<Drop> drops) {
+        Map<String, Long> counts = new HashMap<>();
+        for (Drop drop : drops) counts.merge(drop.getName(), 1L, Long::sum);
+        for (Drop drop : drops) {
+            String name = drop.getName();
+            if (counts.get(name) != 1) continue;
+            String oldKey = "legacy:" + name;
+            if (disabledDrops.remove(oldKey)) {
+                disabledDrops.add(drop.getStorageKey());
+                dirty = true;
+            }
+            if (minedDrops.containsKey(oldKey) && !minedDrops.containsKey(drop.getStorageKey())) {
+                minedDrops.put(drop.getStorageKey(), minedDrops.remove(oldKey));
+                dirty = true;
+            }
+        }
     }
 
-    public void setMessages(boolean messages) {
-        this.messages = messages;
+    public UUID getIdentifier() { return identifier; }
+    public boolean isCobble() { return cobble; }
+    public boolean isMessages() { return messages; }
+    public int getLvl() { return level; }
+    public int getPoints() { return points; }
+    public long getTurboDrop() { return turboDrop; }
+    public long getTurboExp() { return turboExp; }
+    public boolean isTurboDrop() { return turboDrop > System.currentTimeMillis(); }
+    public boolean isTurboExp() { return turboExp > System.currentTimeMillis(); }
+    public Player getPlayer() { return Bukkit.getPlayer(identifier); }
+
+    public void setMessages(boolean enabled) {
+        messages = enabled;
+        dirty = true;
     }
 
-    public void setCobble(boolean cobble) {
-        this.cobble = cobble;
+    public void setCobble(boolean enabled) {
+        cobble = enabled;
+        dirty = true;
     }
 
-    public void setLvl(int lvl) {
-        this.lvl = lvl;
-        Bukkit.getPluginManager().callEvent(new UserLevelChangeEvent(this));
+    public void addTurboExp(long expiry) {
+        turboExp = expiry;
+        dirty = true;
     }
 
-    public void setPoints(int points) {
+    public void addTurboDrop(long expiry) {
+        turboDrop = expiry;
+        dirty = true;
+    }
+
+    public void setProgress(int level, int points) {
+        this.level = level;
         this.points = points;
-    }
-
-    public int getLvl() {
-        return this.lvl;
+        this.dirty = true;
     }
 
     public int getPointsRequired() {
-        int pointsToLvl = ConfigManager.getConfigManager().getPointsToLvlUp();
-        if (pointsToLvl <= 0) {
-            return 100; // domyślna wartość bezpieczna
-        }
-        return this.lvl * pointsToLvl;
+        ConfigManager config = settings.get();
+        return pointsRequired(level, config);
     }
 
-    public int getPoints() {
-        return this.points;
-    }
-
-
-    public void addPoints(int points) {
-        if (ConfigManager.getConfigManager().isLvlStatus()) {
-            this.points += points;
-            Bukkit.getPluginManager().callEvent(new UserPointsChangeEvent(this));
-        }
+    public static int pointsRequired(int level, ConfigManager config) {
+        if (!config.isLvlStatus() || level >= config.getMaxLevel()) return 0;
+        return (int) Math.min((long) level * config.getPointsToLvlUp(), Integer.MAX_VALUE);
     }
 
     public int getPointsToNextLevel() {
-        return this.getPointsRequired() - this.points;
+        return Math.max(0, getPointsRequired() - points);
+    }
+
+    public int addPoints(int earned) {
+        ConfigManager config = settings.get();
+        if (!config.isLvlStatus() || level >= config.getMaxLevel() || earned <= 0) return 0;
+        long remaining = (long) points + earned;
+        int previous = level;
+        while (level < config.getMaxLevel() && remaining >= pointsRequired(level, config)) {
+            remaining -= pointsRequired(level, config);
+            level++;
+        }
+        points = level >= config.getMaxLevel() ? 0 : (int) remaining;
+        dirty = true;
+        Bukkit.getPluginManager().callEvent(new UserPointsChangeEvent(this));
+        if (level != previous) Bukkit.getPluginManager().callEvent(new UserLevelChangeEvent(this));
+        return level < config.getMaxLevel() ? earned : (int) Math.max(0, earned - remaining);
+    }
+
+    public int getDrop(Drop drop) {
+        return minedDrops.getOrDefault(drop.getStorageKey(), 0);
     }
 
     public void addDrop(Drop drop, int amount) {
-        if (drop == null) return;
-        int drops = this.getDrop(drop.getName());
-        this.minedDrops.put(drop.getName(), drops + amount);
-    }
-
-    public HashMap<String, Integer> getMinedDrops() {
-        if (this.minedDrops == null) this.minedDrops = new HashMap<>();
-        return this.minedDrops;
-    }
-
-    public int getDrop(String drop) {
-        if (drop == null) {
-            return 0;
-        }
-        if (this.minedDrops == null || this.minedDrops.isEmpty()) {
-            return 0;
-        }
-        Integer val = this.minedDrops.get(drop);
-        return val == null ? 0 : val;
-    }
-
-    public long getTurboExp() {
-        return this.turboExp;
-    }
-
-    public void addTurboExp(long turboExp) {
-        this.turboExp = turboExp;
-    }
-
-    public long getTurboDrop() {
-        return this.turboDrop;
-    }
-
-    public void addTurboDrop(long turboDrop) {
-        this.turboDrop = turboDrop;
-    }
-
-    public boolean isTurboDrop() {
-        return this.getTurboDrop() > System.currentTimeMillis();
-    }
-
-    public boolean isTurboExp() {
-        return this.getTurboExp() > System.currentTimeMillis();
-    }
-
-    public Set<String> getDisabledDrops() {
-        return this.disabledDrops;
+        minedDrops.put(drop.getStorageKey(), (int) Math.min((long) getDrop(drop) + amount, Integer.MAX_VALUE));
+        dirty = true;
     }
 
     public boolean isDisabled(Drop drop) {
-        return drop != null && this.disabledDrops.contains(drop.getName());
+        return disabledDrops.contains(drop.getStorageKey());
     }
 
-    public void addDisabledDrop(Drop drop) {
-        if (drop == null) return;
-        this.disabledDrops.add(drop.getName());
+    public void setDropEnabled(Drop drop, boolean enabled) {
+        boolean changed = enabled ? disabledDrops.remove(drop.getStorageKey()) : disabledDrops.add(drop.getStorageKey());
+        dirty |= changed;
     }
-
-    public void removeDisabledDrop(Drop drop) {
-        if (drop == null) return;
-        this.disabledDrops.remove(drop.getName());
-    }
-
-    public Player getPlayer() {
-        return Bukkit.getPlayer(this.identifier);
-    }
-
 }
