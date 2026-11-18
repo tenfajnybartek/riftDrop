@@ -20,7 +20,7 @@ database:
   leakDetectionThresholdMs: 0      # Wykrywanie wycieków połączeń (0 = wyłączone)
 placeholders:
   # Wiadomość wyświetlana gdy gracz na danej pozycji w rankingu nie istnieje
-  # Używane dla placeholdera %dropplugin_toplevel-x%
+  # Używane dla placeholdera %riftdrop_toplevel-x%
   toplevel-no-player: "-"
   # Format wyświetlania gracza w rankingu toplevel
   # Dostępne placeholdery: {NAME} - nazwa gracza, {LEVEL} - poziom gracza
@@ -35,18 +35,18 @@ messages:
   drop: "&7Wydropiles: &6{DROP} &7x&a{AMOUNT} &7(+{PKT} pkt, +{EXP} exp) "
   commands:
     drop:
-      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(dropplugin.cmd.drop)"
+      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(riftdrop.cmd.drop)"
       only-players: "&4Blad: &cTa komenda moze byc uzywana tylko przez graczy."
     adrop:
-      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(dropplugin.cmd.adrop)"
+      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(riftdrop.cmd.adrop)"
       usage:
-        - "&cDropPlugin (ADMIN COMMANDS):"
+        - "&criftDrop (ADMIN COMMANDS):"
         - " &8* &7/adrop <drop/exp> <all> <time> &7- &6Nadaje turbo dla calego serwera."
         - " &8* &7/adrop <drop/exp> <player> <time> &7- &6Nadaje turbo dla jednego gracza."
         - " &8* &7/adrop reload - &6Przeladowywuje config"
         - " &8* &7/adrop level <nick_gracza> <poziom> <pkt> &7- &6Ustawia poziom gracza."
       reloading: "&aPrzeładowywanie..."
-      reloaded: "&aDropPlugin został przeładowany! &7({TIME}s)"
+      reloaded: "&ariftDrop został przeładowany! &7({TIME}s)"
       reload-error: "&4Blad: &cNie udalo sie przeladowac konfiguracji."
       invalid-time: "&4Blad: &cNiepoprawny czas: &7{TIME}"
       turbo-enabled: " &8* &aWlaczyles &7{TYPE} &ana: &7{TIME}"
@@ -59,8 +59,8 @@ messages:
       points-not-number: "&4Blad: &cPodane punkty nie sa liczba!"
       level-changed: " &8* &aZmieniono poziom gracza &7{PLAYER} &az &7{OLD_LEVEL} &ana &7{NEW_LEVEL} &ai ustawiono punkty na &7{POINTS}"
     level:
-      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(dropplugin.cmd.level)"
-      no-alevel-permission: "&4Blad: &cNie masz uprawnien do sprawdzania innych graczy! &7(dropplugin.cmd.alevel)"
+      no-permission: "&4Blad: &cNie masz uprawnien do tej komendy! &7(riftdrop.cmd.level)"
+      no-alevel-permission: "&4Blad: &cNie masz uprawnien do sprawdzania innych graczy! &7(riftdrop.cmd.alevel)"
       only-players: "&4Blad: &cTa komenda moze byc uzyta tylko przez graczy."
       player-data-error: "&4Blad: &cNie mozna zaladowac Twoich danych!"
       target-player-data-error: "&4Blad: &cNie mozna zaladowac danych podanego gracza!"
@@ -91,27 +91,27 @@ settings:
     exp-message: "&6TurboExp dostępny jeszcze przez: &f{TIME}&6!"
   # Bonusy do szansy na drop z permisji (sprawdzane na żywo, działają bez restartu)
   # Format: każdy klucz to nazwa grupy z jej ustawieniami
-  # permission: permisja która jest sprawdzana (np. dropplugin.vip)
+  # permission: permisja która jest sprawdzana (np. riftdrop.vip)
   # additionalchance: dodatkowa szansa w PROCENTACH (np. 0.5 = +0.5%, 5.0 = +5%)
   # 
-  # Przykład: gracz z permisją dropplugin.vip otrzyma +0.5% szansy na każdy drop
+  # Przykład: gracz z permisją riftdrop.vip otrzyma +0.5% szansy na każdy drop
   # Wartości są automatycznie konwertowane (0.5 → 0.005 wewnętrznie, ale wyświetlane jako 0.5%)
   # Można dodać więcej grup (np. premium, mvp) z różnymi permisami i wartościami
   # 
   # Przykład wielu grup:
   # chances:
   #   vip:
-  #     permission: dropplugin.vip
+  #     permission: riftdrop.vip
   #     additionalchance: 0.5    # +0.5% szansy
   #   premium:
-  #     permission: dropplugin.premium
+  #     permission: riftdrop.premium
   #     additionalchance: 1.0    # +1.0% szansy
   #   mvp:
-  #     permission: dropplugin.mvp
+  #     permission: riftdrop.mvp
   #     additionalchance: 5.0    # +5.0% szansy
   chances:
     vip:
-      permission: dropplugin.vip
+      permission: riftdrop.vip
       additionalchance: 0.5
 turbos:
   drop: 0

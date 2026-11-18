@@ -5,14 +5,14 @@ plugins {
 }
 
 group = 'pl.tenfajnybartek'
-version = '1.0.0'
+version = '1.1'
 
 repositories {
     mavenCentral()
     maven {
         name = "papermc-repo"
         url = "https://repo.papermc.io/repository/maven-public/"
-        }
+    }
     maven {
         name = 'sonatype-releases'
         url = uri('https://oss.sonatype.org/content/repositories/releases/')
@@ -29,7 +29,6 @@ repositories {
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT")
     compileOnly 'me.clip:placeholderapi:2.11.6'
-    implementation 'org.apache.commons:commons-lang3:3.18.0'
     implementation 'com.zaxxer:HikariCP:5.0.1'
     implementation 'com.mysql:mysql-connector-j:8.3.0'
     implementation 'org.xerial:sqlite-jdbc:3.45.0.0'
@@ -40,11 +39,9 @@ dependencies {
 
 shadowJar {
     archiveClassifier.set('')
-    relocate 'com.zaxxer.hikari', 'pl.tenfajnybartek.libs.hikari'
-    relocate 'org.apache.commons.lang3', 'pl.tenfajnybartek.libs.lang3'
+    relocate 'com.zaxxer.hikari', 'pl.tenfajnybartek.riftdrop.libs.hikari'
     mergeServiceFiles()
     exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
-
 }
 
 def targetJavaVersion = 21
@@ -52,9 +49,7 @@ java {
     def javaVersion = JavaVersion.toVersion(targetJavaVersion)
     sourceCompatibility = javaVersion
     targetCompatibility = javaVersion
-    if (JavaVersion.current() < javaVersion) {
-        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
-    }
+    toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -68,6 +63,11 @@ tasks {
         minecraftVersion(providers.gradleProperty("minecraftVersion").getOrElse("1.21"))
     }
 }
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
 tasks.jar.enabled = false
 tasks.build.dependsOn tasks.shadowJar
 

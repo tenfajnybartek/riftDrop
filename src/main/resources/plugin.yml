@@ -1,10 +1,11 @@
-name: DropPlugin
+name: riftDrop
 version: '${version}'
-main: pl.tenfajnybartek.dropplugin.base.DropPlugin
+main: pl.tenfajnybartek.riftdrop.RiftDropPlugin
 api-version: '1.21'
 authors: [tenfajnybartek]
-description: Plugin na drop ze stone
+description: Konfigurowalne dropy i progresja górnictwa dla Paper
 softdepend: [PlaceholderAPI]
+provides: [DropPlugin]
 commands:
   drop:
     aliases: [ "stone", "kamien" ]
@@ -24,3 +25,11 @@ permissions:
     default: op
   dropplugin.cmd.adrop:
     default: op
+  riftdrop.cmd.drop:
+    default: false
+  riftdrop.cmd.level:
+    default: false
+  riftdrop.cmd.alevel:
+    default: false
+  riftdrop.cmd.adrop:
+    default: false

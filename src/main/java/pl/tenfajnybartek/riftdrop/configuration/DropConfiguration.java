@@ -1,0 +1,56 @@
+package pl.tenfajnybartek.riftdrop.configuration;
+
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.InvalidConfigurationException;
+import pl.tenfajnybartek.riftdrop.RiftDropPlugin;
+import pl.tenfajnybartek.riftdrop.mining.DropRule;
+import pl.tenfajnybartek.riftdrop.mining.IntRange;
+import pl.tenfajnybartek.riftdrop.mining.ItemSpecParser;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
+public record DropConfiguration(int stoneExperience, int obsidianExperience, List<DropRule> rules) {
+    public static DropConfiguration load(RiftDropPlugin plugin) throws IOException, InvalidConfigurationException {
+        if (!new File(plugin.getDataFolder(), "drops.yml").isFile()) plugin.saveResource("drops.yml", false);
+        var yaml = PluginConfiguration.load(plugin, "drops.yml");
+        int stoneExp = nonNegative(yaml, "exps.stone", 0);
+        int obsidianExp = nonNegative(yaml, "exps.obsidian", 0);
+        var drops = yaml.getConfigurationSection("drops");
+        if (drops == null) throw new IllegalArgumentException("drops.yml: brakuje sekcji drops.");
+        List<DropRule> parsed = new ArrayList<>();
+        for (String id : drops.getKeys(false)) {
+            try {
+                var entry = drops.getConfigurationSection(id);
+                if (entry == null) throw new IllegalArgumentException("Wpis musi być sekcją.");
+                IntRange amount = IntRange.parse(entry.getString("amount", "1-2"));
+                IntRange height = IntRange.parse(entry.getString("height", "0-90"));
+                IntRange points = IntRange.parse(entry.getString("points", "3-7"));
+                if (amount.getMin() < 1 || amount.getMax() > 4096 || points.getMin() < 0) {
+                    throw new IllegalArgumentException("amount musi być w zakresie 1–4096, a points nieujemne.");
+                }
+                if (entry.contains("chance") && !(entry.get("chance") instanceof Number)) {
+                    throw new IllegalArgumentException("chance musi być liczbą.");
+                }
+                if (entry.contains("fortune") && !entry.isBoolean("fortune")) {
+                    throw new IllegalArgumentException("fortune musi mieć wartość true lub false.");
+                }
+                parsed.add(new DropRule(id, entry.getString("name", id), entry.getBoolean("fortune", true),
+                        ItemSpecParser.parseItemStack(entry.getString("item")), entry.getDouble("chance", 5.0),
+                        height, amount, points, nonNegative(entry, "exp", 3), nonNegative(entry, "neededlvl", 0)));
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("drops.yml: drops." + id + ": " + failure.getMessage(), failure);
+            }
+        }
+        return new DropConfiguration(stoneExp, obsidianExp, List.copyOf(parsed));
+    }
+
+    private static int nonNegative(ConfigurationSection section, String key, int fallback) {
+        if (section.contains(key) && !section.isInt(key)) throw new IllegalArgumentException(key + " musi być liczbą całkowitą.");
+        int value = section.getInt(key, fallback);
+        if (value < 0) throw new IllegalArgumentException(key + " musi być nieujemne.");
+        return value;
+    }
+}
