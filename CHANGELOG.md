@@ -2,13 +2,25 @@
 
 ## riftDrop 1.3 — kopalnie, Turbo i zarządzanie profilami
 
-**Paper 26.3 · Java 25 · `riftDrop-1.3.jar`**
+**Wymagania** · Paper 26.3 i Java 25
 
-- Każdy drop może mieć własny materiał źródłowy albo grupę materiałów. Regiony w `drops.yml` mogą podnosić próg poziomu.
-- Dodano tygodniowy harmonogram Turbo z godziną lokalną, strefą czasową i zapowiedzią.
-- Komendy Turbo pokazują nakładające się boosty, przedłużają je i anulują. Zmiany są zapisywane w historii administracyjnej.
-- Zapisany profil można edytować po UUID i wyeksportować do YAML.
-- Publiczny `MiningRewardEvent` udostępnia wynik losowania przed dostarczeniem nagrody.
+**Plik do instalacji** · `riftDrop-1.3.jar`
+
+### Co nowego
+
+- **Źródła dropów i progi regionalne.** Każdy drop może mieć własną listę bloków źródłowych, współdzielone grupy materiałów lub oba rodzaje wpisów. Regiony mogą wymagać wyższego poziomu górnictwa do otrzymania dodatkowej nagrody.
+- **Tygodniowy harmonogram Turbo.** TurboDrop i TurboExp można uruchamiać automatycznie w wybrane dni, o godzinie ustawionej w lokalnej strefie czasowej. Każde wydarzenie może mieć własną zapowiedź.
+- **Zarządzanie Turbo.** `/adrop turbo` pokazuje aktywne boosty i kolejne terminy, pozwala ustawiać, przedłużać i anulować boosty oraz wyświetla historię zmian.
+- **Profile offline i eksport.** `/adrop level` pozwala zmienić poziom i punkty zapisanego profilu po UUID, także gdy gracz jest offline. `/adrop profile export <gracz|UUID>` zapisuje profil do YAML, a `/adrop profile history <gracz|UUID>` pokazuje ostatnie operacje.
+- **API nagród.** `MiningRewardEvent` pozwala innym pluginom odczytać wynik losowania i anulować pojedynczą nagrodę przed jej przyznaniem.
+
+### Aktualizacja z 1.2
+
+Zatrzymaj serwer, wykonaj kopię konfiguracji i bazy, a następnie podmień JAR. riftDrop odczyta dotychczasowe pliki YAML i profile. Źródła, regiony i harmonogram możesz dodać do istniejących plików konfiguracyjnych.
+
+### Weryfikacja
+
+Przeszło 10 testów automatycznych oraz próby na Paper 26.3 #255. Sprawdzono też zapis i odczyt profili po restarcie na SQLite i MariaDB.
 
 [Konfiguracja](docs/configuration.md) · [Komendy](docs/commands.md) · [API](docs/development.md#api-nagrody) · [Weryfikacja](docs/development.md#weryfikacja-wydania-13)
 
