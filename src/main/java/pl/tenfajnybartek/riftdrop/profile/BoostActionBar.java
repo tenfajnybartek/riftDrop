@@ -2,6 +2,7 @@ package pl.tenfajnybartek.riftdrop.profile;
 
 import net.kyori.adventure.text.Component;
 import pl.tenfajnybartek.riftdrop.RiftDropPlugin;
+import pl.tenfajnybartek.riftdrop.boost.BoostType;
 import pl.tenfajnybartek.riftdrop.text.Messages;
 import pl.tenfajnybartek.riftdrop.text.BoostTime;
 
@@ -20,8 +21,8 @@ public final class BoostActionBar implements Runnable {
         var messages = new java.util.HashMap<Boosts, Component>();
         for (var player : plugin.getServer().getOnlinePlayers()) {
             var user = plugin.profiles().getUser(player);
-            long drop = Math.max(config.getTurboDrop(), user == null ? 0 : user.getTurboDrop());
-            long exp = Math.max(config.getTurboExp(), user == null ? 0 : user.getTurboExp());
+            long drop = Math.max(plugin.boosts().globalExpiry(BoostType.DROP), user == null ? 0 : user.getTurboDrop());
+            long exp = Math.max(plugin.boosts().globalExpiry(BoostType.EXP), user == null ? 0 : user.getTurboExp());
             if (drop <= now && exp <= now) continue;
             var boost = new Boosts(drop > now ? drop : 0, exp > now ? exp : 0);
             var message = messages.computeIfAbsent(boost, active -> {

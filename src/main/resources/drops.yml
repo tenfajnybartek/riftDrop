@@ -19,6 +19,15 @@
 #              Gracz musi osiągnąć ten poziom aby drop był dostępny
 #              W GUI zablokowane dropy pokazują się jako blokada z informacją o wymaganym poziomie
 
+# Opcjonalnie ustaw przy dropie sources: [stone, deepslate] lub sources: ["@ores"].
+# source-groups:
+#   ores: [iron_ore, deepslate_iron_ore]
+# regions:
+#   kopalnia:
+#     world: world
+#     from: [-20, -64, -20]
+#     to: [20, 100, 20]
+#     minimum-level: 15
 drops:
   coal:
     name: "Wegiel"

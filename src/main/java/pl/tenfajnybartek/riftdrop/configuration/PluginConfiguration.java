@@ -15,11 +15,15 @@ import pl.tenfajnybartek.riftdrop.RiftDropPlugin;
 import pl.tenfajnybartek.riftdrop.storage.ProfileDatabase;
 import pl.tenfajnybartek.riftdrop.mining.PermissionBonus;
 import pl.tenfajnybartek.riftdrop.menu.MenuLayout;
+import pl.tenfajnybartek.riftdrop.boost.BoostType;
+import pl.tenfajnybartek.riftdrop.boost.BoostSchedule;
 
 import java.util.*;
 
 public class PluginConfiguration {
     private final MenuLayout menu;
+    private final BoostSchedule boostSchedule;
+    private final EnumMap<BoostType, Long> scheduleCancelledAt = new EnumMap<>(BoostType.class);
     private final HashMap<String, PermissionBonus> chances;
     private final String dbType;
     private final String dbSslMode;
@@ -125,6 +129,10 @@ public class PluginConfiguration {
         this.dropMessage = getStringSafe(fc, "messages.drop", "");
         this.turboMessage = getStringSafe(fc, "messages.turbo.message", "");
         this.turboGetMessage = getStringSafe(fc, "messages.turbo.get", "");
+        this.boostSchedule = BoostSchedule.read(fc);
+        for (BoostType type : BoostType.values()) {
+            scheduleCancelledAt.put(type, getLongSafe(fc, "turbos.cancelled-" + type.key(), 0L));
+        }
         this.turboExp = getLongSafe(fc, "turbos.exp", 0L);
         this.turboDrop = getLongSafe(fc, "turbos.drop", 0L);
         this.toInv = getBooleanSafe(fc, "settings.toinv.status", true);
@@ -177,7 +185,8 @@ public class PluginConfiguration {
         if (bonuses instanceof ConfigurationSection section) {
             for (String key : section.getKeys(false)) {
                 String path = "settings.chances." + key;
-                double bonus = fc.getDouble(path + ".additionalchance", Double.NaN);
+                double bonus = fc.isDouble(path + ".additionalchance") || fc.isInt(path + ".additionalchance")
+                        ? fc.getDouble(path + ".additionalchance") : Double.NaN;
                 addChance(key, fc.getString(path + ".permission"), bonus, path);
             }
         } else if (bonuses instanceof List<?>) {
@@ -297,11 +306,16 @@ public class PluginConfiguration {
         return new IllegalArgumentException(file + ": " + path + " wymaga " + type + ".");
     }
 
-    public void saveTurbo(boolean drop, long expiry) throws IOException, InvalidConfigurationException {
+    public BoostSchedule boostSchedule() { return boostSchedule; }
+    public long scheduleCancelledAt(BoostType type) { return scheduleCancelledAt.getOrDefault(type, 0L); }
+
+    public void saveTurbo(BoostType type, long expiry, long cancelScheduleAt) throws IOException, InvalidConfigurationException {
         YamlConfiguration current = load(plugin, "config.yml");
-        current.set(drop ? "turbos.drop" : "turbos.exp", expiry);
+        current.set("turbos." + type.key(), expiry);
+        if (cancelScheduleAt > 0) current.set("turbos.cancelled-" + type.key(), cancelScheduleAt);
         saveAtomically(current, new File(plugin.getDataFolder(), "config.yml"));
-        if (drop) turboDrop = expiry;
+        if (cancelScheduleAt > 0) scheduleCancelledAt.put(type, cancelScheduleAt);
+        if (type == BoostType.DROP) turboDrop = expiry;
         else turboExp = expiry;
     }
 

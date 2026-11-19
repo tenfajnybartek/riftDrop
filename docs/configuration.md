@@ -20,6 +20,7 @@ Domyślne pliki zawierają przykłady i teksty gotowe dla polskiego serwera. Zmi
 | `messages` | Teksty nagród, komend i Turbo. Obsługuje kody kolorów `&a` i `&#RRGGBB`. |
 | `placeholders` | `toplevel-format` używa tokenów `{NAME}` i `{LEVEL}`. `toplevel-no-player` zastępuje pustą pozycję. |
 | `turbos` | Znaczniki czasu wygaśnięcia globalnych boostów. Obsługuj je komendą `/adrop`. |
+| `turbo-schedule` | Powtarzalne zdarzenia według dnia tygodnia i godziny lokalnej. |
 
 Do zdalnego MySQL możesz użyć `sslMode: VERIFY_IDENTITY`. Certyfikat serwera musi pochodzić z zaufanego źródła i pasować do adresu ustawionego w `host`. [Tryby TLS Connector/J](https://dev.mysql.com/doc/connector-j/en/connector-j-connp-props-security.html)
 
@@ -71,7 +72,49 @@ Szansa końcowa to suma bazy i bonusów z permisji, podwojona przy aktywnym Turb
 
 Po udanym losowaniu Fortune I daje 33% szansy na dodatkową sztukę, Fortune II ma 50% szansy na dodatkowe 1–2 sztuki, a Fortune III lub wyższe ma 60% szansy na dodatkowe 1–3 sztuki. Dotyczy wpisów z `fortune: true`.
 
-Dodatkowe dropy działają w Survival przy użyciu odpowiedniego narzędzia na kamieniu, granicie, diorycie, andezycie i deepslate. `exps.stone` ustala podstawowe XP za te materiały, a `exps.obsidian` dotyczy obsydianu.
+Dodatkowe dropy działają w Survival przy użyciu odpowiedniego narzędzia. Wpis bez `sources` działa na kamieniu, granicie, diorycie, andezycie i deepslate. `exps.stone` ustala podstawowe XP za te materiały, a `exps.obsidian` dotyczy obsydianu.
+
+### Źródła i regiony
+
+Grupy zawierają konkretne materiały. W `sources` można łączyć materiał i odwołanie do grupy zaczynające się od `@`.
+
+```yaml
+source-groups:
+  basalt-mine: [basalt, polished_basalt]
+regions:
+  glebinowa:
+    world: world
+    from: [-20, -64, -20]
+    to: [20, 0, 20]
+    minimum-level: 25
+drops:
+  diamond:
+    item: "material:diamond"
+    chance: 2
+    height: -64-32
+    neededlvl: 15
+    sources: ["@basalt-mine", deepslate]
+```
+
+Granice regionu są włączne. Dla punktu wewnątrz kilku regionów obowiązuje najwyższy próg razem z `neededlvl` danego dropu. Próg zmienia uprawnienie do dodatkowej nagrody. Podstawowe łamanie bloku nadal zależy od mechaniki serwera i innych pluginów.
+
+## Weekendowe Turbo
+
+```yaml
+turbo-schedule:
+  enabled: true
+  zone: Europe/Warsaw
+  events:
+    weekend-drop:
+      type: drop
+      days: [SATURDAY, SUNDAY]
+      time: "18:00"
+      duration-minutes: 120
+      announce-minutes: 10
+      message: "&6{TYPE} rozpocznie się o {START} i potrwa {MINUTES} min."
+```
+
+`type` to `drop` lub `exp`, `days` to angielskie nazwy dni tygodnia, a `time` jest w formacie `HH:mm`. Zapowiedź może używać `{TYPE}`, `{START}`, `{MINUTES}` i `{ID}`. Wartość 0 wysyła ją o starcie. Po restarcie plugin uwzględnia już trwające zdarzenie. Zapowiedź pojawia się po osiągnięciu jej terminu podczas działania serwera.
 
 ## gui.yml
 

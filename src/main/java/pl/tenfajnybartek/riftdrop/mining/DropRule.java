@@ -66,6 +66,8 @@ public final class DropRule {
         return c / 100.0;
     }
 
+    public String getId() { return id; }
+
     public String getStorageKey() {
         return "id:" + id;
     }

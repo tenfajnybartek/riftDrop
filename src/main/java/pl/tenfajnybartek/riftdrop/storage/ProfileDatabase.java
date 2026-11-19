@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.UnaryOperator;
+import java.util.function.BiConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -129,24 +131,63 @@ public final class ProfileDatabase {
 
     public Future<Profile> load(UUID id) {
         return worker.submit(() -> {
-            recovery.restore(pending);
-            Profile unsaved = pending.get(id);
-            if (unsaved != null) return unsaved;
-            try (Connection connection = connect().getConnection();
-                 PreparedStatement statement = connection.prepareStatement("SELECT * FROM drop_users WHERE identifier = ?")) {
-                statement.setString(1, id.toString());
-                try (ResultSet row = statement.executeQuery()) {
-                    if (!row.next()) return Profile.initial(id);
-                    boolean legacy = row.getInt("data_format") == 1;
-                    String counters = row.getString("minedDrops");
-                    String disabled = row.getString("disabledDrops");
-                    return new Profile(id, row.getString("last_name"), row.getBoolean("cobble"), row.getBoolean("messages"),
-                            row.getLong("turboDrop"), row.getLong("turboExp"), row.getInt("lvl"), row.getLong("points"),
-                            legacy ? ProfileCodec.legacyMap(counters) : ProfileCodec.deserializeMap(counters),
-                            legacy ? ProfileCodec.legacyList(disabled) : ProfileCodec.deserializeList(disabled));
-                }
-            }
+            Profile found = find(id);
+            return found == null ? Profile.initial(id) : found;
         });
+    }
+
+    public CompletableFuture<Profile> findExisting(UUID id) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return find(id);
+            } catch (SQLException | IOException failure) {
+                throw new CompletionException(failure);
+            }
+        }, worker);
+    }
+
+    /** Called with the corresponding local player session suspended. */
+    public CompletableFuture<Profile> updateExisting(UUID id, UnaryOperator<Profile> change,
+                                                    BiConsumer<Profile, Profile> record) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                Profile before = find(id);
+                if (before == null) return null;
+                Profile after = change.apply(before);
+                if (!id.equals(after.id())) throw new IllegalArgumentException("Nie można zmienić UUID profilu.");
+                writeProfiles(List.of(after));
+                pending.remove(id, before);
+                try {
+                    recovery.updateIfPresent(pending);
+                } catch (IOException failure) {
+                    logger.log(Level.WARNING, "Zapisano profil, lecz nie zaktualizowano pliku odzyskiwania.", failure);
+                }
+                record.accept(before, after);
+                return after;
+            } catch (SQLException | IOException failure) {
+                throw new CompletionException(failure);
+            }
+        }, worker);
+    }
+
+    private Profile find(UUID id) throws SQLException, IOException {
+        recovery.restore(pending);
+        Profile unsaved = pending.get(id);
+        if (unsaved != null) return unsaved;
+        try (Connection connection = connect().getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT * FROM drop_users WHERE identifier = ?")) {
+            statement.setString(1, id.toString());
+            try (ResultSet row = statement.executeQuery()) {
+                if (!row.next()) return null;
+                boolean legacy = row.getInt("data_format") == 1;
+                String counters = row.getString("minedDrops");
+                String disabled = row.getString("disabledDrops");
+                return new Profile(id, row.getString("last_name"), row.getBoolean("cobble"), row.getBoolean("messages"),
+                        row.getLong("turboDrop"), row.getLong("turboExp"), row.getInt("lvl"), row.getLong("points"),
+                        legacy ? ProfileCodec.legacyMap(counters) : ProfileCodec.deserializeMap(counters),
+                        legacy ? ProfileCodec.legacyList(disabled) : ProfileCodec.deserializeList(disabled));
+            }
+        }
     }
 
     public void save(Collection<Profile> profiles) {
@@ -168,6 +209,12 @@ public final class ProfileDatabase {
         recovery.restore(pending);
         Map<UUID, Profile> submitted = Map.copyOf(pending);
         if (submitted.isEmpty()) return;
+        writeProfiles(submitted.values());
+        submitted.forEach(pending::remove);
+        recovery.updateIfPresent(pending);
+    }
+
+    private void writeProfiles(Collection<Profile> profiles) throws SQLException {
         String values = sqlite
                 ? "ON CONFLICT(identifier) DO UPDATE SET cobble=excluded.cobble, messages=excluded.messages, turboDrop=excluded.turboDrop, turboExp=excluded.turboExp, lvl=excluded.lvl, points=excluded.points, minedDrops=excluded.minedDrops, disabledDrops=excluded.disabledDrops, last_name=excluded.last_name, data_format=excluded.data_format"
                 : "ON DUPLICATE KEY UPDATE cobble=VALUES(cobble), messages=VALUES(messages), turboDrop=VALUES(turboDrop), turboExp=VALUES(turboExp), lvl=VALUES(lvl), points=VALUES(points), minedDrops=VALUES(minedDrops), disabledDrops=VALUES(disabledDrops), last_name=VALUES(last_name), data_format=VALUES(data_format)";
@@ -178,7 +225,7 @@ public final class ProfileDatabase {
                      """ + values)) {
             connection.setAutoCommit(false);
             try {
-                for (Profile profile : submitted.values()) {
+                for (Profile profile : profiles) {
                     statement.setString(1, profile.id().toString());
                     statement.setBoolean(2, profile.cobble());
                     statement.setBoolean(3, profile.messages());
@@ -193,7 +240,6 @@ public final class ProfileDatabase {
                 }
                 statement.executeBatch();
                 connection.commit();
-                submitted.forEach(pending::remove);
             } catch (SQLException | RuntimeException failure) {
                 try {
                     connection.rollback();
@@ -203,7 +249,6 @@ public final class ProfileDatabase {
                 throw failure;
             }
         }
-        recovery.updateIfPresent(pending);
     }
 
     public List<Rank> ranking() {

@@ -19,6 +19,15 @@ public final class MiningProfile {
             disabledDrops = Set.copyOf(disabledDrops);
         }
 
+        public Profile withProgress(int level, long points) {
+            return new Profile(id, name, cobble, messages, turboDrop, turboExp, level, points, minedDrops, disabledDrops);
+        }
+
+        public Profile withBoost(boolean drop, long expiry) {
+            return new Profile(id, name, cobble, messages, drop ? expiry : turboDrop, drop ? turboExp : expiry,
+                    level, points, minedDrops, disabledDrops);
+        }
+
         public static Profile initial(UUID id) {
             return new Profile(id, null, true, true, 0, 0, 1, 0, Map.of(), Set.of());
         }

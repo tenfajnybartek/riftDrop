@@ -1,5 +1,17 @@
 # Changelog
 
+## riftDrop 1.3 — kopalnie, Turbo i zarządzanie profilami
+
+**Paper 26.3 · Java 25 · `riftDrop-1.3.jar`**
+
+- Każdy drop może mieć własny materiał źródłowy albo grupę materiałów. Regiony w `drops.yml` mogą podnosić próg poziomu.
+- Dodano tygodniowy harmonogram Turbo z godziną lokalną, strefą czasową i zapowiedzią.
+- Komendy Turbo pokazują nakładające się boosty, przedłużają je i anulują. Zmiany są zapisywane w historii administracyjnej.
+- Zapisany profil można edytować po UUID i wyeksportować do YAML.
+- Publiczny `MiningRewardEvent` udostępnia wynik losowania przed dostarczeniem nagrody.
+
+[Konfiguracja](docs/configuration.md) · [Komendy](docs/commands.md) · [API](docs/development.md#api-nagrody) · [Weryfikacja](docs/development.md#weryfikacja-wydania-13)
+
 ## riftDrop 1.2 — Paper 26.3
 
 **Wymagania** · Paper 26.3 i Java 25  
@@ -13,6 +25,7 @@ Wydanie 1.2 przenosi riftDrop na Paper 26.3. Po aktualizacji plugin korzysta z d
 - Enchanty z `drops.yml` są odczytywane z rejestru Paper, również przy użyciu kluczy takich jak `minecraft:unbreaking`.
 - Opcjonalną integrację sprawdzono z PlaceholderAPI 2.12.3. Dostępne są oba prefiksy, `%riftdrop_…%` i `%dropplugin_…%`.
 - Zaktualizowano Gradle Wrapper do 9.8.2, Shadow do 9.6.1 i run-paper do 3.1.0. Zadanie `runServer` uruchamia Paper 26.3.
+- Sterowniki SQLite i MySQL ładuje Paper. JAR riftDrop zawiera HikariCP i zajmuje około 0,32 MB.
 
 ### Weryfikacja
 

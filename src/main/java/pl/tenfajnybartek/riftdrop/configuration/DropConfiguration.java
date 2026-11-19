@@ -1,5 +1,6 @@
 package pl.tenfajnybartek.riftdrop.configuration;
 
+import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import pl.tenfajnybartek.riftdrop.RiftDropPlugin;
@@ -9,10 +10,13 @@ import pl.tenfajnybartek.riftdrop.mining.ItemSpecParser;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
-public record DropConfiguration(int stoneExperience, int obsidianExperience, List<DropRule> rules) {
+public record DropConfiguration(int stoneExperience, int obsidianExperience, List<DropRule> rules,
+                                Map<Material, List<DropRule>> bySource, List<MiningRegion> regions) {
+    public static final Set<Material> DEFAULT_SOURCES = Set.of(
+            Material.STONE, Material.GRANITE, Material.DIORITE, Material.ANDESITE, Material.DEEPSLATE);
+
     public static DropConfiguration load(RiftDropPlugin plugin) throws IOException, InvalidConfigurationException {
         if (!new File(plugin.getDataFolder(), "drops.yml").isFile()) plugin.saveResource("drops.yml", false);
         var yaml = PluginConfiguration.load(plugin, "drops.yml");
@@ -21,6 +25,15 @@ public record DropConfiguration(int stoneExperience, int obsidianExperience, Lis
         var drops = yaml.getConfigurationSection("drops");
         if (drops == null) throw new IllegalArgumentException("drops.yml: brakuje sekcji drops.");
         List<DropRule> parsed = new ArrayList<>();
+        Map<Material, List<DropRule>> bySource = new EnumMap<>(Material.class);
+        Map<String, Set<Material>> groups = new HashMap<>();
+        if (yaml.contains("source-groups")) {
+            var groupConfig = yaml.getConfigurationSection("source-groups");
+            if (groupConfig == null) throw new IllegalArgumentException("source-groups musi być sekcją.");
+            for (String name : groupConfig.getKeys(false)) {
+                groups.put(name, sources(groupConfig.get(name), Map.of()));
+            }
+        }
         for (String id : drops.getKeys(false)) {
             try {
                 var entry = drops.getConfigurationSection(id);
@@ -37,14 +50,39 @@ public record DropConfiguration(int stoneExperience, int obsidianExperience, Lis
                 if (entry.contains("fortune") && !entry.isBoolean("fortune")) {
                     throw new IllegalArgumentException("fortune musi mieć wartość true lub false.");
                 }
-                parsed.add(new DropRule(id, entry.getString("name", id), entry.getBoolean("fortune", true),
+                var rule = new DropRule(id, entry.getString("name", id), entry.getBoolean("fortune", true),
                         ItemSpecParser.parseItemStack(entry.getString("item")), entry.getDouble("chance", 5.0),
-                        height, amount, points, nonNegative(entry, "exp", 3), nonNegative(entry, "neededlvl", 0)));
+                        height, amount, points, nonNegative(entry, "exp", 3), nonNegative(entry, "neededlvl", 0));
+                Set<Material> materials = entry.contains("sources") ? sources(entry.get("sources"), groups) : DEFAULT_SOURCES;
+                for (Material material : materials) bySource.computeIfAbsent(material, key -> new ArrayList<>()).add(rule);
+                parsed.add(rule);
             } catch (IllegalArgumentException failure) {
                 throw new IllegalArgumentException("drops.yml: drops." + id + ": " + failure.getMessage(), failure);
             }
         }
-        return new DropConfiguration(stoneExp, obsidianExp, List.copyOf(parsed));
+        bySource.replaceAll((material, rules) -> List.copyOf(rules));
+        return new DropConfiguration(stoneExp, obsidianExp, List.copyOf(parsed), Map.copyOf(bySource), MiningRegion.read(yaml));
+    }
+
+    static Set<Material> sources(Object value, Map<String, Set<Material>> groups) {
+        List<?> entries = value instanceof List<?> list ? list : List.of(Objects.toString(value, ""));
+        Set<Material> result = EnumSet.noneOf(Material.class);
+        for (Object raw : entries) {
+            if (!(raw instanceof String text) || text.isBlank()) throw new IllegalArgumentException("Niepoprawne sources.");
+            if (text.startsWith("@")) {
+                Set<Material> group = groups.get(text.substring(1));
+                if (group == null) throw new IllegalArgumentException("Nieznana grupa źródeł " + text);
+                result.addAll(group);
+            } else {
+                Material material = Material.matchMaterial(text);
+                if (material == null || !material.isBlock() || material.isAir()) {
+                    throw new IllegalArgumentException("Nieznany blok źródłowy: " + text);
+                }
+                result.add(material);
+            }
+        }
+        if (result.isEmpty()) throw new IllegalArgumentException("Lista źródeł jest pusta.");
+        return Set.copyOf(result);
     }
 
     private static int nonNegative(ConfigurationSection section, String key, int fallback) {

@@ -113,6 +113,18 @@ settings:
     vip:
       permission: riftdrop.vip
       additionalchance: 0.5
+turbo-schedule:
+  enabled: false
+  zone: Europe/Warsaw
+  events:
+    weekend-drop:
+      type: drop
+      days: [SATURDAY, SUNDAY]
+      time: "18:00"
+      duration-minutes: 120
+      announce-minutes: 10
+      message: "&6{TYPE} rozpocznie się o &f{START}&6 i potrwa &f{MINUTES} min&6."
+
 turbos:
   drop: 0
   exp: 0

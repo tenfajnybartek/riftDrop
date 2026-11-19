@@ -8,6 +8,8 @@ import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import pl.tenfajnybartek.riftdrop.configuration.PluginConfiguration;
+import pl.tenfajnybartek.riftdrop.boost.BoostService;
+import pl.tenfajnybartek.riftdrop.boost.BoostType;
 import pl.tenfajnybartek.riftdrop.mining.DropRule;
 import pl.tenfajnybartek.riftdrop.mining.MiningService;
 import pl.tenfajnybartek.riftdrop.profile.MiningProfile;
@@ -44,12 +46,12 @@ public final class DropMenu {
     }
 
     private final MiningService mining;
-    private final PluginConfiguration config;
+    private final BoostService boosts;
     private final MenuLayout layout;
     private final List<Integer> dropSlots;
 
-    public DropMenu(PluginConfiguration config, MiningService mining) {
-        this.config = config;
+    public DropMenu(PluginConfiguration config, MiningService mining, BoostService boosts) {
+        this.boosts = boosts;
         this.layout = config.menu();
         this.mining = mining;
         Set<Integer> reserved = new HashSet<>();
@@ -125,8 +127,11 @@ public final class DropMenu {
                     "POINTS-TO-LEVEL", profile.getPointsToNextLevel(), "POINTS-REQUIRED", profile.getPointsRequired());
             case BOOSTS -> {
                 Map<String, String> tokens = new HashMap<>();
-                addBoostTokens(tokens, "DROP", config.isTurboDrop(), config.getTurboDrop());
-                addBoostTokens(tokens, "EXP", config.isTurboExp(), config.getTurboExp());
+                long drop = boosts.globalExpiry(BoostType.DROP);
+                long exp = boosts.globalExpiry(BoostType.EXP);
+                long now = System.currentTimeMillis();
+                addBoostTokens(tokens, "DROP", drop > now, drop);
+                addBoostTokens(tokens, "EXP", exp > now, exp);
                 addBoostTokens(tokens, "ME-DROP", profile.isTurboDrop(), profile.getTurboDrop());
                 addBoostTokens(tokens, "ME-EXP", profile.isTurboExp(), profile.getTurboExp());
                 yield tokens;

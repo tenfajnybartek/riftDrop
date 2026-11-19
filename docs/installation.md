@@ -4,18 +4,18 @@
 
 ## Wymagania
 
-| Element | riftDrop 1.2 |
+| Element | riftDrop 1.3 |
 | --- | --- |
 | Serwer | Paper 26.3 |
 | Java | Java 25 |
-| Baza | Wbudowany SQLite lub skonfigurowany MySQL |
+| Baza | Domyślny SQLite albo skonfigurowany MySQL, z użyciem sterowników Paper |
 | Integracje | PlaceholderAPI 2.12.3 jest opcjonalne |
 
 Wersja 1.1 pozostaje wydaniem dla Paper 1.21.x na Javie 21. [Wymagania Paper](https://docs.papermc.io/paper/getting-started/)
 
 ## Nowa instalacja
 
-1. Umieść `riftDrop-1.2.jar` w `plugins/`, a następnie uruchom serwer.
+1. Umieść `riftDrop-1.3.jar` w `plugins/`, a następnie uruchom serwer.
 2. Zaczekaj, aż w logu pojawi się informacja o gotowej bazie `Baza danych gotowa (sqlite)`.
 3. Przetestuj `/drop` i `/level`. Ustawienia znajdziesz w `plugins/riftDrop/`.
 
@@ -26,18 +26,24 @@ Wersja 1.1 pozostaje wydaniem dla Paper 1.21.x na Javie 21. [Wymagania Paper](ht
 | `gui.yml` | Układ, ikony, nazwy i opisy menu |
 | `database.db` | Profile w trybie SQLite. SQLite może tworzyć również pliki pomocnicze. |
 | `pending-*.properties` | Zabezpieczone snapshoty oczekujące na ponowny zapis po problemie z bazą |
+| `admin-history.tsv` | Historia zmian administracyjnych |
+| `exports/` | Kopie profili w YAML utworzone poleceniem |
+
+## Aktualizacja z riftDrop 1.2
+
+Zatrzymaj serwer, zrób kopię danych i podmień JAR na `riftDrop-1.3.jar`. Plugin odczyta istniejący schemat bazy i pliki YAML. Nowe bloki, progi i harmonogram można dodać do istniejących plików według przykładów. [Konfiguracja](configuration.md)
 
 ## Aktualizacja z riftDrop 1.1
 
 1. Zatrzymaj poprzedni serwer. Zrób kopię świata i całego katalogu serwera oraz, przy MySQL, osobną kopię bazy. Kopia pozwala odtworzyć poprzednie wydanie również po konwersji świata przez Paper 26.3.
 2. Ustaw Javę 25 w skrypcie startowym lub panelu i podmień JAR serwera na Paper 26.3.
-3. Wymień plik pluginu na `riftDrop-1.2.jar`. Profile i konfiguracja są odczytywane z istniejącego katalogu `plugins/riftDrop/`. Przy MySQL zostaje użyta dotychczasowa tabela `drop_users`.
+3. Wymień plik pluginu na `riftDrop-1.3.jar`. Profile i konfiguracja są odczytywane z istniejącego katalogu `plugins/riftDrop/`. Przy MySQL zostaje użyta dotychczasowa tabela `drop_users`.
 4. Uruchom serwer i sprawdź gotowość bazy, `/level`, `/drop` oraz inne pluginy, których używasz na serwerze.
 
 ## Aktualizacja z DropPlugin 1.0.0
 
 1. Zatrzymaj serwer. Zrób kopię `plugins/DropPlugin/`. Przy MySQL zrób też kopię bazy zawierającej tabelę `drop_users`.
-2. Wykonaj kroki aktualizacji Paper i Javy opisane powyżej. Wyjmij dotychczasowy JAR DropPlugin z `plugins/` i wstaw `riftDrop-1.2.jar`.
+2. Wykonaj kroki aktualizacji Paper i Javy opisane powyżej. Wyjmij dotychczasowy JAR DropPlugin z `plugins/` i wstaw `riftDrop-1.3.jar`.
 3. Uruchom serwer. Jeśli `plugins/riftDrop/` nie istnieje lub jest pusty, riftDrop kopiuje konfigurację, SQLite z plikami pomocniczymi i oczekujące zapisy z `plugins/DropPlugin/`. Jeżeli nowy katalog już zawiera pliki, zostanie użyty jako źródło bieżącej konfiguracji i danych.
 4. Zweryfikuj `/level`, osobiste ustawienia w `/drop` i istniejące integracje. Możesz stopniowo przenosić uprawnienia i placeholdery na prefiks `riftdrop`.
 

@@ -28,6 +28,36 @@ class ProfileDatabaseTest {
         return new ProfileDatabase(SQLITE, folder.toFile(), Logger.getLogger("DropPluginTest"));
     }
 
+    @Test
+    void offlineEditPreservesOtherFieldsAndNeverCreatesAnUnknownProfile() throws Exception {
+        UUID existing = UUID.randomUUID();
+        UUID unknown = UUID.randomUUID();
+        Profile original = new Profile(existing, "TestMiner", false, true, 10, 20, 4, 12,
+                Map.of("id:diamond", 23), Set.of("id:coal"));
+        Profile expected = original.withProgress(9, 34).withBoost(true, 300);
+        var recorded = new java.util.concurrent.atomic.AtomicReference<Profile>();
+        var database = open();
+        try {
+            assertNull(database.updateExisting(unknown, profile -> fail("Nieznany profil"),
+                    (before, after) -> fail("Brak wpisu do historii")).get(5, TimeUnit.SECONDS));
+            database.save(List.of(original));
+            assertEquals(expected, database.updateExisting(existing,
+                    before -> before.withProgress(9, 34).withBoost(true, 300),
+                    (before, after) -> recorded.set(before)).get(5, TimeUnit.SECONDS));
+            assertEquals(original, recorded.get());
+        } finally {
+            database.close();
+        }
+
+        var reopened = open();
+        try {
+            assertEquals(expected, reopened.findExisting(existing).get(5, TimeUnit.SECONDS));
+            assertNull(reopened.findExisting(unknown).get(5, TimeUnit.SECONDS));
+        } finally {
+            reopened.close();
+        }
+    }
+
     private Connection jdbc() throws Exception {
         SQLiteDataSource source = new SQLiteDataSource();
         source.setUrl("jdbc:sqlite:" + folder.resolve("database.db"));

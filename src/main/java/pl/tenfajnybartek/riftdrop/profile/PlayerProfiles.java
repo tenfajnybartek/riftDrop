@@ -10,6 +10,7 @@ import pl.tenfajnybartek.riftdrop.profile.MiningProfile.Profile;
 
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -21,6 +22,7 @@ public final class PlayerProfiles {
     private final Supplier<PluginConfiguration> settings;
     private final Supplier<List<DropRule>> drops;
     private final Logger logger;
+    private final Set<UUID> adminEdits = new HashSet<>();
     private final Map<UUID, MiningProfile> users = new HashMap<>();
     private final Map<UUID, Future<Profile>> loading = new HashMap<>();
     private final Map<UUID, Long> retryAfter = new HashMap<>();
@@ -36,6 +38,7 @@ public final class PlayerProfiles {
 
     public MiningProfile getUser(Player player) {
         UUID id = player.getUniqueId();
+        if (adminEdits.contains(id)) return null;
         MiningProfile user = users.get(id);
         if (user != null) return user;
 
@@ -61,6 +64,29 @@ public final class PlayerProfiles {
         return null;
     }
 
+    public boolean beginAdminEdit(UUID id) {
+        if (!adminEdits.add(id)) return false;
+        Future<Profile> load = loading.remove(id);
+        if (load != null) load.cancel(false);
+        MiningProfile user = users.get(id);
+        if (user != null) database.save(List.of(user.snapshot()));
+        return true;
+    }
+
+    public void finishAdminEdit(UUID id, boolean changed) {
+        if (changed) {
+            users.remove(id);
+            retryAfter.remove(id);
+        }
+        adminEdits.remove(id);
+    }
+
+    public CompletableFuture<Profile> inspect(UUID id) {
+        MiningProfile user = users.get(id);
+        return user == null || adminEdits.contains(id) ? database.findExisting(id)
+                : CompletableFuture.completedFuture(user.snapshot());
+    }
+
     public Progress getPlaceholderProfile(UUID id) {
         return placeholderProfiles.get(id);
     }
@@ -82,12 +108,13 @@ public final class PlayerProfiles {
         if (load != null) load.cancel(false);
         retryAfter.remove(id);
         MiningProfile user = users.remove(id);
-        if (user != null) database.save(List.of(user.snapshot()));
+        if (user != null && !adminEdits.contains(id)) database.save(List.of(user.snapshot()));
     }
 
     public void save() {
         List<Profile> changed = new ArrayList<>();
         for (MiningProfile user : users.values()) {
+            if (adminEdits.contains(user.getIdentifier())) continue;
             Profile snapshot = user.takeChangedSnapshot();
             if (snapshot != null) changed.add(snapshot);
         }

@@ -4,6 +4,8 @@ import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import pl.tenfajnybartek.riftdrop.command.AdminDropCommand;
+import pl.tenfajnybartek.riftdrop.command.AdminHistory;
+import pl.tenfajnybartek.riftdrop.boost.BoostService;
 import pl.tenfajnybartek.riftdrop.command.DropCommand;
 import pl.tenfajnybartek.riftdrop.command.LevelCommand;
 import pl.tenfajnybartek.riftdrop.storage.ProfileDatabase;
@@ -37,6 +39,8 @@ public final class RiftDropPlugin extends JavaPlugin {
     private PlayerProfiles users;
     private BukkitTask saver;
     private BukkitTask actionBar;
+    private BukkitTask scheduledBoostTask;
+    private final BoostService boosts = new BoostService(this);
     private final List<Runnable> unregisterExpansions = new ArrayList<>();
 
     @Override
@@ -58,10 +62,11 @@ public final class RiftDropPlugin extends JavaPlugin {
             manager.registerEvents(new PlayerSessionListener(users), this);
             manager.registerEvents(new LevelNotificationListener(this), this);
             new DropCommand(this);
-            new AdminDropCommand(this);
+            new AdminDropCommand(this, new AdminHistory(getDataFolder().toPath(), getLogger()));
             new LevelCommand(this);
             registerPlaceholderAPI();
             saver = getServer().getScheduler().runTaskTimer(this, new ProfileMaintenance(users, database), 1L, 20L);
+            scheduledBoostTask = getServer().getScheduler().runTaskTimer(this, boosts, 1L, 20L);
             actionBar = getServer().getScheduler().runTaskTimer(this, new BoostActionBar(this), 20L, 20L);
         } catch (Exception | LinkageError failure) {
             getLogger().log(Level.SEVERE, "Nie udało się uruchomić riftDrop.", failure);
@@ -73,6 +78,7 @@ public final class RiftDropPlugin extends JavaPlugin {
     public void onDisable() {
         if (saver != null) saver.cancel();
         if (actionBar != null) actionBar.cancel();
+        if (scheduledBoostTask != null) scheduledBoostTask.cancel();
         for (Runnable unregister : unregisterExpansions) {
             try {
                 unregister.run();
@@ -104,15 +110,17 @@ public final class RiftDropPlugin extends JavaPlugin {
     public void reloadSettings() throws IOException, InvalidConfigurationException {
         PluginConfiguration config = new PluginConfiguration(this);
         MiningService drops = new MiningService(this, config, DropConfiguration.load(this));
-        DropMenu menu = new DropMenu(config, drops);
+        DropMenu menu = new DropMenu(config, drops, boosts);
         if (users != null) users.migrateOnlineDrops();
         settings = new Settings(config, drops, menu);
+        boosts.reload();
         if (users != null) users.migrateOnlineDrops();
         if (databaseSettings != null && !databaseSettings.equals(config.databaseSettings())) {
             getLogger().warning("Zmieniono ustawienia bazy. Zaczną obowiązywać po restarcie serwera.");
         }
     }
 
+    public BoostService boosts() { return boosts; }
     public PlayerProfiles profiles() { return users; }
     public ProfileDatabase database() { return database; }
     public PluginConfiguration configuration() { return settings.config(); }

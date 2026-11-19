@@ -12,9 +12,20 @@
 | `/adrop reload` | Wczytuje ponownie ustawienia, dropy i GUI. Alias komendy `/admindrop`. | `riftdrop.cmd.adrop` |
 | `/adrop drop <all\|gracz> <czas>` | Włącza TurboDrop globalnie albo dla gracza online. | `riftdrop.cmd.adrop` |
 | `/adrop exp <all\|gracz> <czas>` | Włącza TurboExp globalnie albo dla gracza online. | `riftdrop.cmd.adrop` |
-| `/adrop level <gracz> <poziom> [punkty]` | Ustawia postęp gracza online. Bez ostatniego argumentu ustawia zero punktów. | `riftdrop.cmd.adrop` |
+| `/adrop level <gracz\|UUID> <poziom> [punkty]` | Ustawia postęp zapisanego profilu. Bez ostatniego argumentu ustawia zero punktów. | `riftdrop.cmd.adrop` |
+| `/adrop turbo status [all\|gracz\|UUID]` | Pokazuje ręczne, zaplanowane i osobiste Turbo, efektywny czas końca oraz następne starty. | `riftdrop.cmd.adrop` |
+| `/adrop turbo set <drop\|exp> <cel> <czas>` | Ustawia ręczne Turbo od teraz. | `riftdrop.cmd.adrop` |
+| `/adrop turbo extend <drop\|exp> <cel> <czas>` | Dodaje czas do końca aktywnego Turbo albo liczy od teraz. | `riftdrop.cmd.adrop` |
+| `/adrop turbo cancel <drop\|exp> <cel>` | Zdejmuje osobiste Turbo albo anuluje ręczne Turbo globalne i bieżące wystąpienia z harmonogramu. | `riftdrop.cmd.adrop` |
+| `/adrop turbo history [all\|gracz\|UUID]` | Pokazuje ostatnie dziesięć pasujących operacji Turbo. Bez celu pokazuje wszystkie cele. | `riftdrop.cmd.adrop` |
+| `/adrop profile export <gracz\|UUID>` | Zapisuje kopię profilu w `plugins/riftDrop/exports/`. | `riftdrop.cmd.adrop` |
+| `/adrop profile history <gracz\|UUID>` | Pokazuje ostatnie dziesięć operacji na profilu. | `riftdrop.cmd.adrop` |
 
 Domyślnie wszyscy gracze mają dostęp do swoich dropów i poziomu. Polecenia administracyjne i odczyt poziomu innego gracza są dostępne dla operatorów. Jeśli nowy węzeł `riftdrop.*` nie został ustawiony, plugin sprawdza odpowiadający mu węzeł `dropplugin.*`. Ta reguła obejmuje także bonusy skonfigurowane pod nowym prefiksem.
+
+Dla Turbo `<cel>` oznacza `all`, dokładny nick gracza online albo UUID zapisanego profilu. UUID działa również dla starszych komend `/adrop drop` i `/adrop exp`. Anulowanie globalne pozostawia osobiste boosty i przyszłe wystąpienia harmonogramu. Anulowanie osobiste pozostawia aktywne globalne Turbo.
+
+Historia jest dopisywana do `plugins/riftDrop/admin-history.tsv`. Kopia profilu zawiera poziom, punkty, preferencje, terminy Turbo i statystyki. Polecenie tworzy osobny plik eksportu do wykorzystania podczas migracji.
 
 Jeśli konfiguracja innego pluginu wywołuje komendę z pełną nazwą, zmień `dropplugin:drop` na `riftdrop:drop` i analogicznie zmień prefiks dla `level` i `adrop`.
 
