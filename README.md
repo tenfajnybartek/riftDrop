@@ -39,3 +39,7 @@ Przy aktualizacji z riftDrop 1.2 użyjesz istniejącego katalogu `plugins/riftDr
 | Budowanie, testy i architektura | [Dokumentacja deweloperska](docs/development.md) |
 
 Poprzednie wydanie **riftDrop 1.1** jest przeznaczone dla Paper 1.21.x na Javie 21.
+
+## Licencja
+
+riftDrop jest dostępny na licencji Apache 2.0. Informacje o bibliotekach dołączonych do JAR-a znajdują się w pliku NOTICE. [LICENSE](LICENSE) · [NOTICE](NOTICE)

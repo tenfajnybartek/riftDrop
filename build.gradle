@@ -47,6 +47,10 @@ shadowJar {
     archiveClassifier.set('')
     relocate 'com.zaxxer.hikari', 'pl.tenfajnybartek.riftdrop.libs.hikari'
     exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    from(project.rootDir) {
+        include 'LICENSE', 'NOTICE'
+        into 'META-INF'
+    }
 }
 
 def targetJavaVersion = 25
